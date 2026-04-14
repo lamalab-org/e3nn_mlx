@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "e3nn-mlx"
+version = "0.1.0"
+description = "Backend-neutral e3nn core with an MLX-native backend"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["e3nn_core*", "e3nn_backend*", "e3nn_mlx*"]
