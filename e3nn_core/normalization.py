@@ -4,18 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .typing import NormalizationMode
+from .typing import IrrepNormalizationMode, PathNormalizationMode
 
 
 @dataclass(frozen=True, slots=True)
 class NormalizationMetadata:
-    irrep_normalization: NormalizationMode = "component"
-    path_normalization: NormalizationMode = "component"
+    irrep_normalization: IrrepNormalizationMode = "component"
+    path_normalization: PathNormalizationMode = "element"
     num_paths: int = 1
+    num_elements: int = 1
+    coefficient: float = 1.0
 
     def scale(self) -> float:
-        if self.num_paths <= 0:
-            raise ValueError("num_paths must be > 0")
-        if self.path_normalization == "component":
-            return 1.0
-        return self.num_paths ** -0.5
+        return self.coefficient
