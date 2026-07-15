@@ -9,7 +9,9 @@ from e3nn_core.cg import wigner_3j
 from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 
 from .compat import require_mlx
+from .compat import mlx_module_base
 from .irreps_array import IrrepsArray
+from .ops_rotations import angles_to_xyz
 
 
 def _parse_degrees(spec, input_parity: int) -> tuple[list[int], Irreps]:
@@ -109,3 +111,72 @@ def spherical_harmonics(
 
 def sh(degrees, vectors, *, normalize: bool = True, normalization: str = "component"):
     return spherical_harmonics(degrees, vectors, normalize=normalize, normalization=normalization)
+
+
+def spherical_harmonics_alpha_beta(degrees, alpha, beta, *, normalization: str = "integral"):
+    """Evaluate spherical harmonics from polar angles in the e3nn YXY convention."""
+
+    return spherical_harmonics(
+        degrees,
+        angles_to_xyz(alpha, beta),
+        normalize=False,
+        normalization=normalization,
+    )
+
+
+class SphericalHarmonics(mlx_module_base()):
+    """MLX module wrapper for :func:`spherical_harmonics`."""
+
+    def __init__(
+        self,
+        irreps_out,
+        normalize: bool = True,
+        normalization: str = "component",
+        *,
+        irreps_in: Irreps | str = "1o",
+    ) -> None:
+        super().__init__()
+        irreps_in = Irreps(irreps_in).remove_zero_multiplicities()
+        if len(irreps_in) != 1 or irreps_in[0].mul != 1 or irreps_in[0].ir.l != 1:
+            raise ValueError("irreps_in must contain exactly one vector irrep")
+        self.irreps_in = irreps_in
+        _, self.irreps_out = _parse_degrees(irreps_out, irreps_in[0].ir.p)
+        self.normalize = bool(normalize)
+        _scale_for_normalization(0, normalization)
+        self.normalization = normalization
+        self._degrees = tuple(part.ir.l for part in self.irreps_out for _ in range(part.mul))
+
+    def __call__(self, vectors):
+        if isinstance(vectors, IrrepsArray):
+            if vectors.irreps != self.irreps_in:
+                raise ValueError("input irreps do not match SphericalHarmonics.irreps_in")
+            return spherical_harmonics(
+                self.irreps_out,
+                vectors,
+                normalize=self.normalize,
+                normalization=self.normalization,
+            )
+        return spherical_harmonics(
+            self._degrees,
+            vectors,
+            normalize=self.normalize,
+            normalization=self.normalization,
+        )
+
+
+class SphericalHarmonicsAlphaBeta(mlx_module_base()):
+    """MLX module evaluating spherical harmonics from ``alpha, beta`` angles."""
+
+    def __init__(self, degrees, *, normalization: str = "integral") -> None:
+        super().__init__()
+        self._degrees, self.irreps_out = _parse_degrees(degrees, -1)
+        self.normalization = normalization
+        _scale_for_normalization(0, normalization)
+
+    def __call__(self, alpha, beta):
+        return spherical_harmonics_alpha_beta(
+            self._degrees,
+            alpha,
+            beta,
+            normalization=self.normalization,
+        )

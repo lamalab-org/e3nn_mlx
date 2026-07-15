@@ -60,6 +60,18 @@ def rotation_matrix(alpha, beta, gamma):
 angles_to_matrix = rotation_matrix
 
 
+def angles_to_xyz(alpha, beta):
+    """Return the unit vector obtained by rotating the positive y axis."""
+
+    mx, _ = require_mlx()
+    alpha, beta = _as_broadcast_arrays(alpha, beta)
+    sin_beta = mx.sin(beta)
+    return mx.stack(
+        [sin_beta * mx.sin(alpha), mx.cos(beta), sin_beta * mx.cos(alpha)],
+        axis=-1,
+    )
+
+
 def xyz_to_angles(vector):
     mx, _ = require_mlx()
     norm = mx.sqrt(mx.sum(vector * vector, axis=-1, keepdims=True))
@@ -94,6 +106,24 @@ def compose_angles(alpha1, beta1, gamma1, alpha2, beta2, gamma2):
     return matrix_to_angles(
         rotation_matrix(alpha1, beta1, gamma1) @ rotation_matrix(alpha2, beta2, gamma2)
     )
+
+
+def rand_angles(*shape, dtype=None):
+    """Sample Haar-uniform YXY Euler angles."""
+
+    mx, _ = require_mlx()
+    dtype = mx.float32 if dtype is None else dtype
+    alpha = 2.0 * pi * mx.random.uniform(shape=shape, dtype=dtype)
+    gamma = 2.0 * pi * mx.random.uniform(shape=shape, dtype=dtype)
+    cos_beta = 2.0 * mx.random.uniform(shape=shape, dtype=dtype) - 1.0
+    beta = mx.arccos(mx.clip(cos_beta, -1.0, 1.0))
+    return alpha, beta, gamma
+
+
+def rand_matrix(*shape, dtype=None):
+    """Sample Haar-uniform proper rotation matrices."""
+
+    return rotation_matrix(*rand_angles(*shape, dtype=dtype))
 
 
 def axis_angle_to_matrix(axis, angle):
@@ -161,25 +191,35 @@ def quaternion_to_axis_angle(quaternion):
 
 
 def matrix_to_axis_angle(matrix):
-    mx, _ = require_mlx()
-    trace = matrix[..., 0, 0] + matrix[..., 1, 1] + matrix[..., 2, 2]
-    angle = mx.arccos(mx.clip((trace - 1.0) / 2.0, -1.0, 1.0))
-    vector = mx.stack(
-        [
-            matrix[..., 2, 1] - matrix[..., 1, 2],
-            matrix[..., 0, 2] - matrix[..., 2, 0],
-            matrix[..., 1, 0] - matrix[..., 0, 1],
-        ],
-        axis=-1,
-    )
-    vector_norm = mx.sqrt(mx.sum(vector * vector, axis=-1, keepdims=True))
-    default = mx.broadcast_to(mx.array([1.0, 0.0, 0.0], dtype=matrix.dtype), vector.shape)
-    axis = mx.where(vector_norm > 1e-8, vector / mx.maximum(vector_norm, 1e-12), default)
-    return axis, angle
+    return quaternion_to_axis_angle(matrix_to_quaternion(matrix))
+
+
+def angles_to_axis_angle(alpha, beta, gamma):
+    return matrix_to_axis_angle(rotation_matrix(alpha, beta, gamma))
+
+
+def axis_angle_to_angles(axis, angle):
+    return matrix_to_angles(axis_angle_to_matrix(axis, angle))
 
 
 def matrix_to_quaternion(matrix):
-    return axis_angle_to_quaternion(*matrix_to_axis_angle(matrix))
+    """Convert rotation matrices to unit quaternions, including near pi."""
+
+    mx, _ = require_mlx()
+    m00, m11, m22 = matrix[..., 0, 0], matrix[..., 1, 1], matrix[..., 2, 2]
+    zero = mx.array(0.0, dtype=matrix.dtype)
+
+    def signed_sqrt(value, sign_source):
+        magnitude = 0.5 * mx.sqrt(mx.maximum(zero, value))
+        return mx.where(sign_source < 0, -magnitude, magnitude)
+
+    w = 0.5 * mx.sqrt(mx.maximum(zero, 1.0 + m00 + m11 + m22))
+    x = signed_sqrt(1.0 + m00 - m11 - m22, matrix[..., 2, 1] - matrix[..., 1, 2])
+    y = signed_sqrt(1.0 - m00 + m11 - m22, matrix[..., 0, 2] - matrix[..., 2, 0])
+    z = signed_sqrt(1.0 - m00 - m11 + m22, matrix[..., 1, 0] - matrix[..., 0, 1])
+    quaternion = mx.stack([w, x, y, z], axis=-1)
+    norm = mx.sqrt(mx.sum(quaternion * quaternion, axis=-1, keepdims=True))
+    return quaternion / mx.maximum(norm, mx.array(1e-12, dtype=matrix.dtype))
 
 
 def angles_to_quaternion(alpha, beta, gamma):
@@ -189,6 +229,44 @@ def angles_to_quaternion(alpha, beta, gamma):
 
 def quaternion_to_angles(quaternion):
     return matrix_to_angles(quaternion_to_matrix(quaternion))
+
+
+def compose_quaternion(quaternion1, quaternion2):
+    """Compose quaternions in the same order as matrix multiplication."""
+
+    mx, _ = require_mlx()
+    quaternion1, quaternion2 = mx.broadcast_arrays(quaternion1, quaternion2)
+    w1, x1, y1, z1 = (quaternion1[..., index] for index in range(4))
+    w2, x2, y2, z2 = (quaternion2[..., index] for index in range(4))
+    return mx.stack(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
+        ],
+        axis=-1,
+    )
+
+
+def compose_axis_angle(axis1, angle1, axis2, angle2):
+    quaternion = compose_quaternion(
+        axis_angle_to_quaternion(axis1, angle1),
+        axis_angle_to_quaternion(axis2, angle2),
+    )
+    return quaternion_to_axis_angle(quaternion)
+
+
+def rand_quaternion(*shape, dtype=None):
+    """Sample unit quaternions representing Haar-uniform rotations."""
+
+    return angles_to_quaternion(*rand_angles(*shape, dtype=dtype))
+
+
+def rand_axis_angle(*shape, dtype=None):
+    """Sample axis-angle pairs representing Haar-uniform rotations."""
+
+    return quaternion_to_axis_angle(rand_quaternion(*shape, dtype=dtype))
 
 
 def _matrix_exp_generator(generator, angle):
