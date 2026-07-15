@@ -9,6 +9,7 @@ from typing import Any
 from e3nn_core.irreps import Irreps
 
 from .compat import require_mlx
+from .compat import mlx_module_base
 from .irreps_array import IrrepsArray
 from .ops_basic import compile_or_identity, get_extension
 
@@ -23,8 +24,9 @@ class _LinearInstruction:
     weight_slice: slice
 
 
-class Linear:
+class Linear(mlx_module_base()):
     def __init__(self, irreps_in: Irreps | str, irreps_out: Irreps | str, *, bias: bool = True, compile: bool = False) -> None:
+        super().__init__()
         mx, _ = require_mlx()
         self.irreps_in = Irreps(irreps_in).remove_zero_multiplicities()
         self.irreps_out = Irreps(irreps_out).remove_zero_multiplicities()
@@ -46,10 +48,17 @@ class Linear:
                     )
                     start += size
         self.instructions = tuple(instructions)
-        scale = 1.0 / sqrt(max(1, self.irreps_in.num_irreps))
-        self.weight = mx.random.uniform(low=-scale, high=scale, shape=(start,))
-        scalar_bias = sum(part.mul for part in self.irreps_out if part.ir.l == 0) if bias else 0
-        self.bias = mx.zeros((scalar_bias,), dtype=self.weight.dtype) if scalar_bias else None
+        weight_chunks = []
+        for instruction in instructions:
+            fan_in = sum(part.mul for part in self.irreps_in if part.ir == self.irreps_out[instruction.output_index].ir)
+            weight_chunks.append(
+                mx.random.normal(shape=(instruction.weight_slice.stop - instruction.weight_slice.start,))
+                / sqrt(max(1, fan_in))
+            )
+        self.weight = mx.concatenate(weight_chunks) if weight_chunks else None
+        parameter_dtype = self.weight.dtype if self.weight is not None else mx.float32
+        scalar_bias = sum(part.mul for part in self.irreps_out if part.ir.is_scalar()) if bias else 0
+        self.bias = mx.zeros((scalar_bias,), dtype=parameter_dtype) if scalar_bias else None
         self._compiled_impl = compile_or_identity(self._apply_arrays, enabled=compile)
 
     def _apply_arrays(self, array: Any, weight: Any, bias: Any | None) -> Any:
@@ -65,9 +74,10 @@ class Linear:
                 chunk = input_chunks[instruction.input_index].reshape(*input_array.leading_shape, instruction.in_mul, instruction.dim)
                 matrix = weight[instruction.weight_slice].reshape(instruction.out_mul, instruction.in_mul).astype(array.dtype)
                 outputs[output_index] = outputs[output_index] + mx.einsum("oi,...id->...od", matrix, chunk)
-            if bias is not None and out_part.ir.l == 0:
+            if bias is not None and out_part.ir.is_scalar():
                 width = out_part.mul
-                outputs[output_index] = outputs[output_index] + bias[bias_cursor : bias_cursor + width].reshape(1, width, 1)
+                bias_shape = (*((1,) * len(input_array.leading_shape)), width, 1)
+                outputs[output_index] = outputs[output_index] + bias[bias_cursor : bias_cursor + width].reshape(*bias_shape)
                 bias_cursor += width
         return mx.concatenate([out.reshape(*input_array.leading_shape, -1) for out in outputs], axis=-1)
 

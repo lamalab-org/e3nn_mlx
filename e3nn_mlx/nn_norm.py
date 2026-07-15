@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from .irreps_array import IrrepsArray
+from .compat import mlx_module_base
 from .ops_reduce import norm
 
 
-class Norm:
+class Norm(mlx_module_base()):
     def __init__(self, *, per_irrep: bool = True, squared: bool = False) -> None:
+        super().__init__()
         self.per_irrep = per_irrep
         self.squared = squared
 
