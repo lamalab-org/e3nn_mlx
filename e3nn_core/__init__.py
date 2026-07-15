@@ -1,11 +1,11 @@
 """Backend-agnostic static O(3) metadata."""
 
-from .cg import ClebschGordanKey, clebsch_gordan, su2_clebsch_gordan
+from .cg import ClebschGordanKey, clebsch_gordan, su2_clebsch_gordan, wigner_3j
 from .instructions import TensorProductInstruction, generate_tensor_product_instructions, make_tensor_product_instructions
-from .irreps import Irrep, Irreps, MulIrrep
+from .irreps import Irrep, Irreps, MulIrrep, SortResult
 from .normalization import NormalizationMetadata
 from .rotations import RotationAngles
-from .wigner import WignerDKey, Wigner3jKey, change_basis_real_to_complex
+from .wigner import WignerDKey, Wigner3jKey, change_basis_real_to_complex, so3_generators, su2_generators
 
 __all__ = [
     "ClebschGordanKey",
@@ -14,6 +14,7 @@ __all__ = [
     "MulIrrep",
     "NormalizationMetadata",
     "RotationAngles",
+    "SortResult",
     "TensorProductInstruction",
     "Wigner3jKey",
     "WignerDKey",
@@ -22,4 +23,7 @@ __all__ = [
     "generate_tensor_product_instructions",
     "make_tensor_product_instructions",
     "su2_clebsch_gordan",
+    "su2_generators",
+    "so3_generators",
+    "wigner_3j",
 ]

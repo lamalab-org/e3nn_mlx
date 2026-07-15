@@ -77,6 +77,17 @@ def clebsch_gordan(ir_in1: Irrep | str, ir_in2: Irrep | str, ir_out: Irrep | str
 
 
 @functools.lru_cache(maxsize=None)
+def wigner_3j(l1: int, l2: int, l3: int) -> tuple[tuple[tuple[float, ...], ...], ...]:
+    """Return e3nn-normalized real Wigner 3j coefficients."""
+
+    if not all(isinstance(l, int) and l >= 0 for l in (l1, l2, l3)):
+        raise ValueError("angular momenta must be non-negative integers")
+    if not abs(l1 - l2) <= l3 <= l1 + l2:
+        raise ValueError("angular momenta do not satisfy the triangle inequality")
+    return _so3_clebsch_gordan(l1, l2, l3)
+
+
+@functools.lru_cache(maxsize=None)
 def _so3_clebsch_gordan(l1: int, l2: int, l3: int) -> tuple[tuple[tuple[float, ...], ...], ...]:
     q1 = change_basis_real_to_complex(l1)
     q2 = change_basis_real_to_complex(l2)
