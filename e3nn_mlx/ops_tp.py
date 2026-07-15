@@ -11,7 +11,7 @@ from e3nn_core.cg import clebsch_gordan
 from e3nn_core.instructions import TensorProductInstruction, generate_tensor_product_instructions, make_tensor_product_instructions
 from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 
-from .compat import require_mlx
+from .compat import mlx_module_base, require_mlx
 from .irreps_array import IrrepsArray
 from .ops_basic import compile_or_identity, get_extension
 
@@ -282,7 +282,7 @@ def compile_tensor_product(plan: TensorProductPlan, *, extension: str | None = N
     return compile_or_identity(compiled)
 
 
-class TensorProduct:
+class TensorProduct(mlx_module_base()):
     def __init__(
         self,
         irreps_in1: Irreps | str,
@@ -299,6 +299,7 @@ class TensorProduct:
         shared_weights: bool = True,
         compile_left_right: bool = True,
     ) -> None:
+        super().__init__()
         mx, _ = require_mlx()
         self.irreps_in1 = Irreps(irreps_in1).remove_zero_multiplicities()
         self.irreps_in2 = Irreps(irreps_in2).remove_zero_multiplicities()
@@ -334,9 +335,13 @@ class TensorProduct:
             )
             start += size
         self.weight_numel = start
-        self.weight = mx.random.normal(shape=(self.weight_numel,)) if self.internal_weights and self.weight_numel else mx.zeros((0,))
-        self.output_mask = self._build_output_mask(mx)
+        self.weight = mx.random.normal(shape=(self.weight_numel,)) if self.internal_weights and self.weight_numel else None
+        self._output_mask = self._build_output_mask(mx)
         self._compiled = compile_or_identity(self._call_arrays, enabled=compile_left_right)
+
+    @property
+    def output_mask(self):
+        return self._output_mask
 
     def _build_output_mask(self, mx):
         chunks = []
@@ -598,7 +603,7 @@ class FullTensorProduct(TensorProduct):
             self.irreps_out,
             self._output_index_groups,
         )
-        self.output_mask = mx.maximum(grouped_mask.array[0], 0.0)
+        self._output_mask = mx.maximum(grouped_mask.array[0], 0.0)
 
     def __repr__(self) -> str:
         path_count = sum(prod(ins.path_shape) for ins in self.instructions)
@@ -744,7 +749,7 @@ class TensorSquare(TensorProduct):
                 self.irreps_out,
                 self._output_index_groups,
             )
-            self.output_mask = mx.maximum(grouped_mask.array[0], 0.0)
+            self._output_mask = mx.maximum(grouped_mask.array[0], 0.0)
         else:
             if parsed_filter is not None:
                 raise ValueError("Both irreps_out and filter_ir_out were provided")
