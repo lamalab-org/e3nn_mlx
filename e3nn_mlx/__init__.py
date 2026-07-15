@@ -46,6 +46,7 @@ from .ops_sh import (
     spherical_harmonics_alpha_beta,
 )
 from .ops_reduce_tensor import ReducedTensorProducts
+from .ops_s2 import FromS2Grid, ToS2Grid, s2_grid
 from .ops_tp import (
     ElementwiseTensorProduct,
     FullTensorProduct,
@@ -60,6 +61,7 @@ __all__ = [
     "ElementwiseTensorProduct",
     "FullTensorProduct",
     "FullyConnectedTensorProduct",
+    "FromS2Grid",
     "Gate",
     "Irrep",
     "Irreps",
@@ -73,6 +75,7 @@ __all__ = [
     "SphericalHarmonicsAlphaBeta",
     "TensorProduct",
     "TensorSquare",
+    "ToS2Grid",
     "angles_to_axis_angle",
     "angles_to_matrix",
     "angles_to_quaternion",
@@ -94,6 +97,7 @@ __all__ = [
     "matrix_z",
     "mlx_backend",
     "rotation_matrix",
+    "s2_grid",
     "quaternion_to_angles",
     "quaternion_to_axis_angle",
     "quaternion_to_matrix",
