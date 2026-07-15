@@ -14,7 +14,7 @@ from e3nn_mlx.ops_reduce import cross, dot, norm
 
 @pytest.mark.mlx
 def test_linear_mixes_multiplicities_per_irrep() -> None:
-    linear = Linear("2x0e + 1o", "1x0e + 1o")
+    linear = Linear("2x0e + 1o", "1x0e + 1o", bias=True)
     weight = mlx_backend.asarray(
         [
             2.0 * math.sqrt(2.0),

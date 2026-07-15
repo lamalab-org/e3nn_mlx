@@ -24,7 +24,7 @@ pytestmark = pytest.mark.mlx
 
 def test_linear_and_norm_are_real_mlx_modules() -> None:
     _, nn = require_mlx()
-    linear = Linear("2x0e+1o", "0e+1o")
+    linear = Linear("2x0e+1o", "0e+1o", bias=True)
     norm = Norm()
     assert isinstance(linear, nn.Module)
     assert isinstance(norm, nn.Module)

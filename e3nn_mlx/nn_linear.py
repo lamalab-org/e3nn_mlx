@@ -41,10 +41,12 @@ class Linear(mlx_module_base()):
         irreps_in: Irreps | str,
         irreps_out: Irreps | str,
         *,
-        bias: bool | Sequence[bool] = True,
+        f_in: int | None = None,
+        f_out: int | None = None,
+        bias: bool | Sequence[bool] = False,
         biases: bool | Sequence[bool] | None = None,
         instructions: Sequence[tuple[int, int]] | None = None,
-        internal_weights: bool = True,
+        internal_weights: bool | None = None,
         shared_weights: bool = True,
         path_normalization: str = "element",
         compile: bool = False,
@@ -53,7 +55,13 @@ class Linear(mlx_module_base()):
         mx, _ = require_mlx()
         self.irreps_in = Irreps(irreps_in).remove_zero_multiplicities()
         self.irreps_out = Irreps(irreps_out).remove_zero_multiplicities()
-        self.internal_weights = bool(internal_weights)
+        if (f_in is None) != (f_out is None):
+            raise ValueError("f_in and f_out must either both be provided or both be None")
+        if f_in is not None and (f_in <= 0 or f_out <= 0):
+            raise ValueError("f_in and f_out must be positive")
+        self.f_in = f_in
+        self.f_out = f_out
+        self.internal_weights = shared_weights if internal_weights is None else bool(internal_weights)
         self.shared_weights = bool(shared_weights)
         if self.internal_weights and not self.shared_weights:
             raise ValueError("internal_weights=True requires shared_weights=True")
@@ -85,6 +93,8 @@ class Linear(mlx_module_base()):
                 for candidate_input, candidate_output in path_indices
                 if candidate_output == output_index
             )
+            if f_in is not None:
+                denominator *= f_in
             normalization_denominators.append(max(1, denominator))
 
         normalized_instructions = []
@@ -108,12 +118,8 @@ class Linear(mlx_module_base()):
         self.instructions = tuple(normalized_instructions)
         self.weight_numel = start
 
-        weight_chunks = []
-        for instruction in self.instructions:
-            weight_chunks.append(
-                mx.random.normal(shape=(instruction.weight_slice.stop - instruction.weight_slice.start,))
-            )
-        initial_weight = mx.concatenate(weight_chunks) if weight_chunks else None
+        weight_shape = (self.weight_numel,) if f_in is None else (f_in, f_out, self.weight_numel)
+        initial_weight = mx.random.normal(shape=weight_shape) if self.weight_numel else None
         self.weight = initial_weight if self.internal_weights else None
 
         requested_biases = bias if biases is None else biases
@@ -129,7 +135,8 @@ class Linear(mlx_module_base()):
         self._bias_output_indices = tuple(index for index, flag in enumerate(bias_flags) if flag)
         bias_numel = sum(self.irreps_out[index].mul for index in self._bias_output_indices)
         parameter_dtype = initial_weight.dtype if initial_weight is not None else mx.float32
-        self.bias = mx.zeros((bias_numel,), dtype=parameter_dtype) if bias_numel else None
+        bias_shape = (bias_numel,) if f_out is None else (f_out, bias_numel)
+        self.bias = mx.zeros(bias_shape, dtype=parameter_dtype) if bias_numel else None
 
         active_outputs = {instruction.output_index for instruction in self.instructions}
         mask_chunks = [
@@ -151,11 +158,12 @@ class Linear(mlx_module_base()):
         resolved = self.weight if weight is None else weight
         if resolved is None:
             raise RuntimeError("Weights must be provided when internal_weights is False")
+        expected = (self.weight_numel,) if self.f_in is None else (self.f_in, self.f_out, self.weight_numel)
         if self.shared_weights:
-            if tuple(resolved.shape) != (self.weight_numel,):
-                raise ValueError(f"expected shared weight shape {(self.weight_numel,)}, got {tuple(resolved.shape)}")
-        elif resolved.ndim < 1 or resolved.shape[-1] != self.weight_numel:
-            raise ValueError(f"expected unshared weight shape (..., {self.weight_numel}), got {tuple(resolved.shape)}")
+            if tuple(resolved.shape) != expected:
+                raise ValueError(f"expected shared weight shape {expected}, got {tuple(resolved.shape)}")
+        elif resolved.ndim < len(expected) or tuple(resolved.shape[-len(expected) :]) != expected:
+            raise ValueError(f"expected unshared weight shape (..., {', '.join(map(str, expected))}), got {tuple(resolved.shape)}")
         return resolved
 
     def weight_view_for_instruction(self, instruction_index: int, weight: Any | None = None):
@@ -179,6 +187,43 @@ class Linear(mlx_module_base()):
         mx, _ = require_mlx()
         input_array = IrrepsArray(self.irreps_in, array)
         input_chunks = input_array.chunk_arrays()
+        if self.f_in is not None:
+            if not input_array.leading_shape or input_array.leading_shape[-1] != self.f_in:
+                raise ValueError(f"feature Linear expects input shape (..., {self.f_in}, {self.irreps_in.dim})")
+            batch_shape = input_array.leading_shape[:-1]
+            outputs = [
+                mx.zeros((*batch_shape, self.f_out, part.mul, part.ir.dim), dtype=array.dtype)
+                for part in self.irreps_out
+            ]
+            bias_cursor = 0
+            for output_index, out_part in enumerate(self.irreps_out):
+                for instruction in self.instructions:
+                    if instruction.output_index != output_index:
+                        continue
+                    chunk = input_chunks[instruction.input_index].reshape(
+                        *batch_shape, self.f_in, instruction.in_mul, instruction.dim
+                    )
+                    prefix = weight.shape[:-1]
+                    matrix = weight[..., instruction.weight_slice].reshape(
+                        *prefix, instruction.in_mul, instruction.out_mul
+                    ).astype(array.dtype)
+                    outputs[output_index] = outputs[output_index] + instruction.path_weight * mx.einsum(
+                        "...pqio,...pid->...qod", matrix, chunk
+                    )
+                if bias is not None and output_index in self._bias_output_indices:
+                    width = out_part.mul
+                    bias_shape = (*((1,) * len(batch_shape)), self.f_out, width, 1)
+                    outputs[output_index] = outputs[output_index] + bias[..., bias_cursor : bias_cursor + width].reshape(
+                        *bias_shape
+                    )
+                    bias_cursor += width
+            if not outputs:
+                return mx.zeros((*batch_shape, self.f_out, 0), dtype=array.dtype)
+            return mx.concatenate(
+                [out.reshape(*batch_shape, self.f_out, part.dim) for out, part in zip(outputs, self.irreps_out, strict=True)],
+                axis=-1,
+            )
+
         outputs = [
             mx.zeros((*input_array.leading_shape, part.mul, part.ir.dim), dtype=array.dtype)
             for part in self.irreps_out

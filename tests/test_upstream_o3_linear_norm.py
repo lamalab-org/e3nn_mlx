@@ -133,6 +133,39 @@ def test_upstream_linear_weight_views_and_unshared_weights() -> None:
 
 
 @pytest.mark.mlx
+def test_upstream_linear_feature_channels() -> None:
+    mx = mlx_backend._require()
+    module = o3.Linear("0e + 1e + 2e", "0e + 2x1e + 2e", f_in=44, f_out=25, bias=False, compile=True)
+    assert module.weight_numel == 4
+    assert module.weight.shape == (44, 25, 4)
+    values = mx.random.normal(shape=(10, 44, module.irreps_in.dim))
+    output = module(_array(module.irreps_in, values))
+    assert output.shape == (10, 25, module.irreps_out.dim)
+    assert 0.6 < float(mx.mean(output.array**2)) < 1.5
+
+    angles = o3.rand_angles()
+    d_in = o3.irreps_wigner_d(module.irreps_in, *angles)
+    d_out = o3.irreps_wigner_d(module.irreps_out, *angles)
+    rotated = module(_array(module.irreps_in, values @ mx.swapaxes(d_in, -1, -2))).array
+    expected = output.array @ mx.swapaxes(d_out, -1, -2)
+    assert _max_abs(rotated - expected) < 3e-4
+
+
+@pytest.mark.mlx
+def test_upstream_linear_defaults_to_no_bias_and_external_unshared_weights() -> None:
+    mx = mlx_backend._require()
+    default = o3.Linear("0e", "0e")
+    assert default.bias is None
+    assert set(default.parameters()) == {"weight"}
+
+    external = o3.Linear("2x0e", "3x0e", shared_weights=False, bias=False)
+    assert not external.internal_weights and external.parameters() == {}
+    values = mx.random.normal(shape=(5, 2))
+    weights = mx.random.normal(shape=(5, external.weight_numel))
+    assert external(_array("2x0e", values), weights).shape == (5, 3)
+
+
+@pytest.mark.mlx
 @pytest.mark.parametrize("irreps_in", ["", "5x0e", "1e + 2e + 4x1e + 3x3o"])
 @pytest.mark.parametrize("squared", [True, False])
 def test_upstream_norm_equivariance_compile_and_empty(irreps_in: str, squared: bool) -> None:
