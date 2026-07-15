@@ -129,8 +129,8 @@ def _apply_connection_mode(inst: TensorProductInstruction, pair: Any, weights: A
     if mode == "uvw":
         if weights is None:
             return pair.reshape(*pair.shape[:-3], inst.path_shape[0] * inst.path_shape[1], inst.ir_out.dim)
-        weight = weights.reshape(*weights.shape[:-1], inst.path_shape[2], inst.path_shape[0], inst.path_shape[1]).astype(dtype)
-        return mx.einsum("...wuv,...uvd->...wd", weight, pair)
+        weight = weights.reshape(*weights.shape[:-1], *inst.path_shape).astype(dtype)
+        return mx.einsum("...uvw,...uvd->...wd", weight, pair)
     if mode == "uvu":
         if weights is None:
             return mx.sum(pair, axis=-2)

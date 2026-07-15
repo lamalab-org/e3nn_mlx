@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from e3nn_mlx.backend import mlx_backend
@@ -15,8 +17,8 @@ def test_linear_mixes_multiplicities_per_irrep() -> None:
     linear = Linear("2x0e + 1o", "1x0e + 1o")
     weight = mlx_backend.asarray(
         [
-            2.0,
-            -1.0,
+            2.0 * math.sqrt(2.0),
+            -math.sqrt(2.0),
             1.0,
         ]
     )
@@ -24,7 +26,7 @@ def test_linear_mixes_multiplicities_per_irrep() -> None:
     array = IrrepsArray("2x0e + 1o", mlx_backend.asarray([[1.0, 3.0, 4.0, 5.0, 6.0]]))
     out = linear(array, weight=weight, bias=bias)
     assert out.irreps == linear.irreps_out
-    assert out.array.tolist()[0] == [2.0 * 1.0 - 1.0 * 3.0 + 0.5, 4.0, 5.0, 6.0]
+    assert out.array.tolist()[0] == pytest.approx([2.0 * 1.0 - 1.0 * 3.0 + 0.5, 4.0, 5.0, 6.0])
 
 
 @pytest.mark.mlx

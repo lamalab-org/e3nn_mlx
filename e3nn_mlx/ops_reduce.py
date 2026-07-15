@@ -11,19 +11,29 @@ from .irreps_array import IrrepsArray
 def norm(array: IrrepsArray, *, per_irrep: bool = True, squared: bool = False) -> IrrepsArray:
     mx, _ = require_mlx()
     if per_irrep:
+        if not array.irreps:
+            return IrrepsArray(Irreps(), mx.zeros((*array.leading_shape, 0), dtype=array.dtype))
         outputs = []
         out_irreps = []
         for part, chunk in zip(array.irreps, array.chunk_arrays(), strict=True):
             block = chunk.reshape(*array.leading_shape, part.mul, part.ir.dim)
             reduced = mx.sum(block * block, axis=-1, keepdims=True)
             if not squared:
-                reduced = mx.sqrt(reduced)
+                reduced = mx.where(
+                    reduced > 0,
+                    mx.sqrt(mx.maximum(reduced, mx.array(1e-12, dtype=reduced.dtype))),
+                    mx.zeros_like(reduced),
+                )
             outputs.append(reduced.reshape(*array.leading_shape, part.mul))
             out_irreps.append(MulIrrep(part.mul, Irrep(0, 1)))
         return IrrepsArray(Irreps(out_irreps), mx.concatenate(outputs, axis=-1))
     reduced = mx.sum(array.array * array.array, axis=-1, keepdims=True)
     if not squared:
-        reduced = mx.sqrt(reduced)
+        reduced = mx.where(
+            reduced > 0,
+            mx.sqrt(mx.maximum(reduced, mx.array(1e-12, dtype=reduced.dtype))),
+            mx.zeros_like(reduced),
+        )
     return IrrepsArray("0e", reduced)
 
 

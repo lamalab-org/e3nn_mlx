@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from e3nn_mlx.backend import mlx_backend
@@ -33,12 +35,12 @@ def test_linear_and_norm_are_real_mlx_modules() -> None:
 def test_linear_parameter_update_changes_forward_result() -> None:
     linear = Linear("2x0e", "0e", bias=True)
     array = IrrepsArray("2x0e", mlx_backend.asarray([[2.0, 3.0]]))
-    linear.update({"weight": mlx_backend.asarray([1.0, 0.0]), "bias": mlx_backend.asarray([0.0])})
+    linear.update({"weight": mlx_backend.asarray([math.sqrt(2.0), 0.0]), "bias": mlx_backend.asarray([0.0])})
     first = linear(array).array
-    linear.update({"weight": mlx_backend.asarray([0.0, 2.0]), "bias": mlx_backend.asarray([1.0])})
+    linear.update({"weight": mlx_backend.asarray([0.0, 2.0 * math.sqrt(2.0)]), "bias": mlx_backend.asarray([1.0])})
     second = linear(array).array
-    assert first.tolist() == [[2.0]]
-    assert second.tolist() == [[7.0]]
+    assert first.tolist()[0] == pytest.approx([2.0])
+    assert second.tolist()[0] == pytest.approx([7.0])
 
 
 def test_linear_only_biases_invariant_even_scalars() -> None:
