@@ -79,14 +79,40 @@ class Irrep:
         parity = self.p * other.p
         return tuple(Irrep(l_out, parity) for l_out in range(abs(self.l - other.l), self.l + other.l + 1))
 
-    def __mul__(self, other: Irrep | str) -> tuple[Irrep, ...]:
+    def __mul__(self, other: Irrep | str | int) -> tuple[Irrep, ...] | Irreps:
+        if isinstance(other, int):
+            if other < 0:
+                raise ValueError("multiplicity must be non-negative")
+            return Irreps(((other, self),))
         return self.selection_rule(other)
+
+    def __rmul__(self, other: int) -> Irreps:
+        result = self * other
+        if not isinstance(result, Irreps):
+            raise TypeError("Irrep can only be left-multiplied by an integer")
+        return result
 
     def __add__(self, other: Irrep | str) -> Irreps:
         return Irreps(((1, self), (1, Irrep.parse(other))))
 
     def __str__(self) -> str:
         return f"{self.l}{self.parity_token}"
+
+    def __repr__(self) -> str:
+        return str(self)
+
+    def __iter__(self):
+        return iter((self.l, self.p))
+
+    @staticmethod
+    def iterator(lmax: int | None = None) -> Iterator[Irrep]:
+        if lmax is not None and lmax < 0:
+            raise ValueError("lmax must be non-negative")
+        l = 0
+        while lmax is None or l <= lmax:
+            yield Irrep(l, 1)
+            yield Irrep(l, -1)
+            l += 1
 
 
 @dataclass(frozen=True, slots=True, order=True)
@@ -103,9 +129,11 @@ class MulIrrep:
         return self.mul * self.ir.dim
 
     @classmethod
-    def parse(cls, spec: str | MulIrrep | tuple[int, Irrep | str]) -> MulIrrep:
+    def parse(cls, spec: str | Irrep | MulIrrep | tuple[int, Irrep | str]) -> MulIrrep:
         if isinstance(spec, cls):
             return spec
+        if isinstance(spec, Irrep):
+            return cls(1, spec)
         if isinstance(spec, tuple):
             mul, ir = spec
             return cls(mul=int(mul), ir=Irrep.parse(ir))
@@ -137,9 +165,11 @@ class SortResult:
 class Irreps:
     parts: tuple[MulIrrep, ...]
 
-    def __init__(self, spec: str | Irreps | Iterable[MulIrrep | str | tuple[int, Irrep | str]] = ()) -> None:
+    def __init__(self, spec: str | Irrep | Irreps | Iterable[MulIrrep | Irrep | str | tuple[int, Irrep | str]] = ()) -> None:
         if isinstance(spec, Irreps):
             parts = spec.parts
+        elif isinstance(spec, Irrep):
+            parts = (MulIrrep(1, spec),)
         elif isinstance(spec, str):
             token = spec.strip()
             if not token:
@@ -268,8 +298,50 @@ class Irreps:
     def __add__(self, other: str | Irreps | Iterable[MulIrrep | str | tuple[int, Irrep | str]]) -> Irreps:
         return self.extend(other)
 
+    def __mul__(self, multiplicity: int) -> Irreps:
+        if not isinstance(multiplicity, int):
+            return NotImplemented
+        if multiplicity < 0:
+            raise ValueError("multiplicity must be non-negative")
+        return Irreps(self.parts * multiplicity)
+
+    def __rmul__(self, multiplicity: int) -> Irreps:
+        return self * multiplicity
+
+    @property
+    def slice_by_mul(self) -> _MulIndexSlice:
+        return _MulIndexSlice(self)
+
     def __str__(self) -> str:
         return "+".join(str(part) for part in self.parts)
 
     def __repr__(self) -> str:
         return f"Irreps('{self}')"
+
+
+class _MulIndexSlice:
+    """Multiplicity-indexed slicing helper matching upstream ``Irreps``."""
+
+    def __init__(self, irreps: Irreps) -> None:
+        self.irreps = irreps
+
+    def __getitem__(self, item: slice) -> Irreps:
+        if not isinstance(item, slice):
+            raise TypeError("slice_by_mul only supports slices")
+        if item.step not in (None, 1):
+            raise ValueError("slice_by_mul does not support a step")
+        total = self.irreps.num_irreps
+        start, stop, _ = item.indices(total)
+        if stop <= start:
+            return Irreps()
+        parts: list[MulIrrep] = []
+        cursor = 0
+        for part in self.irreps:
+            part_start, part_stop = cursor, cursor + part.mul
+            overlap = max(0, min(stop, part_stop) - max(start, part_start))
+            if overlap:
+                parts.append(MulIrrep(overlap, part.ir))
+            cursor = part_stop
+            if cursor >= stop:
+                break
+        return Irreps(parts)

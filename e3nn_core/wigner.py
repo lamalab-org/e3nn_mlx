@@ -45,17 +45,19 @@ def change_basis_real_to_complex(l: int) -> tuple[tuple[complex, ...], ...]:
 
 
 @functools.lru_cache(maxsize=None)
-def su2_generators(l: int) -> tuple[tuple[tuple[complex, ...], ...], ...]:
+def su2_generators(l: int | float) -> tuple[tuple[tuple[complex, ...], ...], ...]:
     """Return the three anti-Hermitian SU(2) generators used by e3nn."""
 
-    if not isinstance(l, int) or l < 0:
-        raise ValueError("l must be a non-negative integer")
-    dim = 2 * l + 1
+    if not isinstance(l, (int, float)) or l < 0 or not float(2 * l).is_integer():
+        raise ValueError("l must be a non-negative integer or half-integer")
+    l = float(l)
+    dim = int(2 * l + 1)
     raising = [[0j for _ in range(dim)] for _ in range(dim)]
     lowering = [[0j for _ in range(dim)] for _ in range(dim)]
-    for index, m in enumerate(range(-l, l)):
+    magnetic = [-l + index for index in range(dim)]
+    for index, m in enumerate(magnetic[:-1]):
         raising[index + 1][index] = -sqrt(l * (l + 1) - m * (m + 1))
-    for index, m in enumerate(range(-l + 1, l + 1)):
+    for index, m in enumerate(magnetic[1:]):
         lowering[index][index + 1] = sqrt(l * (l + 1) - m * (m - 1))
 
     generators = [[[0j for _ in range(dim)] for _ in range(dim)] for _ in range(3)]
@@ -63,7 +65,7 @@ def su2_generators(l: int) -> tuple[tuple[tuple[complex, ...], ...], ...]:
         for column in range(dim):
             generators[0][row][column] = 0.5 * (raising[row][column] + lowering[row][column])
             generators[2][row][column] = -0.5j * (raising[row][column] - lowering[row][column])
-    for index, m in enumerate(range(-l, l + 1)):
+    for index, m in enumerate(magnetic):
         generators[1][index][index] = 1j * m
     return tuple(tuple(tuple(row) for row in generator) for generator in generators)
 

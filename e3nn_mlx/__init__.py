@@ -1,6 +1,6 @@
 """MLX-native e3nn runtime."""
 
-from e3nn_core import Irrep, Irreps, MulIrrep, wigner_3j
+from e3nn_core import Irrep, Irreps, MulIrrep, su2_generators, wigner_3j
 
 from .backend import MLXBackend, mlx_backend
 from .irreps_array import IrrepsArray
@@ -102,6 +102,7 @@ __all__ = [
     "sh",
     "spherical_harmonics",
     "spherical_harmonics_alpha_beta",
+    "su2_generators",
     "tensor_product",
     "tensor_product_plan",
     "wigner_3j",
