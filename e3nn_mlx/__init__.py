@@ -45,6 +45,7 @@ from .ops_sh import (
     spherical_harmonics,
     spherical_harmonics_alpha_beta,
 )
+from .ops_reduce_tensor import ReducedTensorProducts
 from .ops_tp import (
     ElementwiseTensorProduct,
     FullTensorProduct,
@@ -67,6 +68,7 @@ __all__ = [
     "MLXBackend",
     "MulIrrep",
     "Norm",
+    "ReducedTensorProducts",
     "SphericalHarmonics",
     "SphericalHarmonicsAlphaBeta",
     "TensorProduct",
