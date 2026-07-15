@@ -190,6 +190,45 @@ def test_upstream_tensor_product_unshared_weight_broadcast_and_validation() -> N
 
 
 @pytest.mark.mlx
+@pytest.mark.parametrize("shared", [True, False])
+def test_upstream_tensor_product_accepts_per_instruction_weight_lists(shared: bool) -> None:
+    mx = mlx_backend._require()
+    product = o3.FullyConnectedTensorProduct(
+        "1e + 2e",
+        "1e + 2e",
+        "0e + 1e + 2e",
+        internal_weights=False,
+        shared_weights=shared,
+        compile_left_right=False,
+    )
+    batch = 3
+    left = _array(product.irreps_in1, mx.random.normal(shape=(batch, product.irreps_in1.dim)))
+    right = _array(product.irreps_in2, mx.random.normal(shape=(batch, product.irreps_in2.dim)))
+    if shared:
+        weight_list = [mx.random.normal(shape=instruction.path_shape) for instruction in product.instructions]
+        flat = mx.concatenate([value.reshape(-1) for value in weight_list])
+    else:
+        weight_list = [mx.random.normal(shape=(batch, *instruction.path_shape)) for instruction in product.instructions]
+        flat = mx.concatenate([value.reshape(batch, -1) for value in weight_list], axis=-1)
+    assert _max_abs(product(left, right, weight_list).array - product(left, right, flat).array) < 2e-6
+    with pytest.raises(ValueError, match="per-instruction weights"):
+        product(left, right, weight_list[:-1])
+
+
+@pytest.mark.mlx
+def test_upstream_tensor_product_single_connected_output_with_extra_zeros() -> None:
+    mx = mlx_backend._require()
+    first = o3.TensorProduct("5x0e", "5x0e", "5x0e", [(0, 0, 0, "uvw", True)], compile_left_right=False)
+    second = o3.TensorProduct("5x0e", "5x0e", "5x0e + 3x0o", [(0, 0, 0, "uvw", True)], compile_left_right=False)
+    second.update({"weight": first.weight})
+    left = _array("5x0e", mx.random.normal(shape=(3, 5)))
+    right = _array("5x0e", mx.random.normal(shape=(3, 5)))
+    output1, output2 = first(left, right), second(left, right)
+    assert _max_abs(output1.array - output2.array[:, :5]) < 2e-6
+    assert _max_abs(output2.array[:, 5:]) == 0.0
+
+
+@pytest.mark.mlx
 def test_upstream_tensor_product_weight_views_copy_and_save_load() -> None:
     mx = mlx_backend._require()
     product = o3.FullyConnectedTensorProduct("1e + 2e", "1e + 2e", "0e + 1e + 2e", compile_left_right=False)

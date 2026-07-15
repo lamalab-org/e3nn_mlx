@@ -66,6 +66,10 @@ def test_upstream_rotation_inverse_and_coordinate_axes() -> None:
     assert _max_abs((o3.matrix_y(mx.random.normal(shape=(100,))) @ vectors[..., None])[..., 1, 0] - vectors[:, 1]) < 2e-5
     assert _max_abs((o3.matrix_z(mx.random.normal(shape=(100,))) @ vectors[..., None])[..., 2, 0] - vectors[:, 2]) < 2e-5
 
+    axis, angle = o3.rand_axis_angle(100_000)
+    rotated = o3.axis_angle_to_matrix(axis, angle) @ mx.array([0.2, 0.5, 0.3])
+    assert _max_abs(mx.mean(rotated, axis=0)) < 0.008
+
 
 @pytest.mark.mlx
 def test_upstream_angular_spherical_harmonics_equivariance_and_identity() -> None:
@@ -97,6 +101,10 @@ def test_upstream_spherical_harmonics_general_calls_parity_and_zeros() -> None:
     requested = o3.Irreps("1x0e + 4x1o + 3x2e")
     output = o3.spherical_harmonics(requested, mx.random.normal(shape=(7, 3)), normalize=True)
     assert output.shape[-1] == requested.dim
+    with pytest.raises(ValueError, match="requires parity"):
+        o3.SphericalHarmonics("0e + 1e + 2e", irreps_in="1o")
+    with pytest.raises(ValueError, match="exactly one vector"):
+        o3.SphericalHarmonics("0e + 1o", irreps_in="1o + 2e")
 
     zeros = o3.spherical_harmonics([0, 1], mx.zeros((1, 3)), normalize=False, normalization="norm")
     assert _max_abs(zeros - mx.array([[1.0, 0.0, 0.0, 0.0]])) == 0.0

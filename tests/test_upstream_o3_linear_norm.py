@@ -106,6 +106,10 @@ def test_upstream_linear_instruction_validation_and_empty_paths() -> None:
     assert {(instruction.i_in, instruction.i_out) for instruction in selected.instructions} == {(0, 1), (1, 0)}
     assert {instruction.path_shape for instruction in selected.instructions} == {(4, 8), (3, 2)}
 
+    default = o3.Linear("4x0e + 3x1o + 2x0e", "2x1o + 8x0e", bias=False)
+    assert {(instruction.i_in, instruction.i_out) for instruction in default.instructions} == {(0, 1), (1, 0), (2, 1)}
+    assert {instruction.path_shape for instruction in default.instructions} == {(4, 8), (2, 8), (3, 2)}
+
 
 @pytest.mark.mlx
 def test_upstream_linear_weight_views_and_unshared_weights() -> None:

@@ -385,6 +385,8 @@ class TensorProduct(mlx_module_base()):
             if self.weight_numel > 0 and not self.internal_weights:
                 raise RuntimeError("Weights must be provided when internal_weights is False")
             return self.weight if self.weight_numel > 0 else None
+        if isinstance(weight, (list, tuple)):
+            weight = self._flatten_weight_list(weight)
         if self.shared_weights:
             if tuple(weight.shape) != (self.weight_numel,):
                 raise ValueError(f"Expected shared weight shape {(self.weight_numel,)}, got {tuple(weight.shape)}")
@@ -392,6 +394,35 @@ class TensorProduct(mlx_module_base()):
             if weight.shape[-1] != self.weight_numel:
                 raise ValueError(f"Expected unshared weight shape (..., {self.weight_numel}), got {tuple(weight.shape)}")
         return weight
+
+    def _flatten_weight_list(self, weights: list[Any] | tuple[Any, ...]) -> Any:
+        mx, _ = require_mlx()
+        if len(weights) != len(self._weighted_instruction_meta):
+            raise ValueError(
+                f"expected {len(self._weighted_instruction_meta)} per-instruction weights, got {len(weights)}"
+            )
+        if not weights:
+            return mx.zeros((0,))
+        leading_shapes = []
+        for value, meta in zip(weights, self._weighted_instruction_meta, strict=True):
+            path_shape = meta.instruction.path_shape
+            if self.shared_weights:
+                if tuple(value.shape) != path_shape:
+                    raise ValueError(f"expected per-instruction weight shape {path_shape}, got {tuple(value.shape)}")
+                leading_shapes.append(())
+            else:
+                if value.ndim < len(path_shape) or tuple(value.shape[-len(path_shape) :]) != path_shape:
+                    raise ValueError(
+                        f"expected per-instruction weight shape (..., {', '.join(map(str, path_shape))}), got {tuple(value.shape)}"
+                    )
+                leading_shapes.append(tuple(value.shape[: -len(path_shape)]))
+        leading_shape = mx.broadcast_shapes(*leading_shapes)
+        flattened = []
+        for value, meta in zip(weights, self._weighted_instruction_meta, strict=True):
+            path_shape = meta.instruction.path_shape
+            value = mx.broadcast_to(value, (*leading_shape, *path_shape))
+            flattened.append(value.reshape(*leading_shape, prod(path_shape)))
+        return mx.concatenate(flattened, axis=-1)
 
     def __call__(self, left: IrrepsArray, right: IrrepsArray, weight: Any | None = None) -> IrrepsArray:
         if left.irreps != self.irreps_in1:
