@@ -109,6 +109,63 @@ def test_upstream_spherical_harmonics_general_calls_parity_and_zeros() -> None:
 
 
 @pytest.mark.mlx
+@pytest.mark.parametrize("degree", range(11))
+def test_upstream_spherical_harmonics_normalization_through_l10(degree: int) -> None:
+    mx = mlx_backend._require()
+    vector = mx.random.normal(shape=(3,))
+    integral = o3.spherical_harmonics(degree, vector, normalize=True, normalization="integral")
+    normed = o3.spherical_harmonics(degree, vector, normalize=True, normalization="norm")
+    component = o3.spherical_harmonics(degree, vector, normalize=True, normalization="component")
+    assert abs(float(mx.mean(integral**2)) - 1.0 / (4.0 * math.pi)) < 3e-4
+    assert abs(float(mx.sqrt(mx.sum(normed**2))) - 1.0) < 2e-3
+    assert abs(float(mx.mean(component**2)) - 1.0) < 3e-3
+
+
+@pytest.mark.mlx
+@pytest.mark.parametrize("degree", range(10))
+def test_upstream_spherical_harmonics_recurrence_and_jacobian(degree: int) -> None:
+    mx = mlx_backend._require()
+    vector = mx.random.normal(shape=(3,))
+    higher = o3.spherical_harmonics(degree + 1, vector, normalize=False)
+    lower = o3.spherical_harmonics(degree, vector, normalize=False)
+    coefficient = mx.array(o3.wigner_3j(degree + 1, degree, 1), dtype=vector.dtype)
+    recurrence = mx.einsum("ijk,j,k->i", coefficient, lower, vector)
+    alpha = mx.sqrt(mx.sum(recurrence**2)) / mx.sqrt(mx.sum(higher**2))
+    higher_unit = higher / mx.sqrt(mx.sum(higher**2))
+    recurrence_unit = recurrence / mx.sqrt(mx.sum(recurrence**2))
+    assert _max_abs(higher_unit - recurrence_unit) < (4e-3 if degree >= 7 else 3e-4)
+
+    jacobian = mx.stack(
+        [
+            mx.grad(lambda value, index=index: o3.spherical_harmonics(degree + 1, value, normalize=False)[index])(
+                vector
+            )
+            for index in range(2 * (degree + 1) + 1)
+        ],
+        axis=0,
+    )
+    expected = (degree + 1) / alpha * mx.einsum("ijk,j->ik", coefficient, lower)
+    assert _max_abs(jacobian - expected) < (2e-2 if degree >= 7 else 2e-3)
+
+
+@pytest.mark.mlx
+def test_upstream_spherical_harmonics_monte_carlo_closure() -> None:
+    mx = mlx_backend._require()
+    vectors = mx.random.normal(shape=(200_000, 3))
+    harmonics = [
+        o3.spherical_harmonics(degree, vectors, normalize=True, normalization="integral")
+        for degree in range(4)
+    ]
+    for degree1, first in enumerate(harmonics):
+        for degree2, second in enumerate(harmonics):
+            gram = 4.0 * math.pi * mx.mean(first[..., :, None] * second[..., None, :], axis=0)
+            if degree1 == degree2:
+                assert _max_abs(gram - mx.eye(2 * degree1 + 1)) < 0.025
+            else:
+                assert _max_abs(gram) < 0.025
+
+
+@pytest.mark.mlx
 @pytest.mark.parametrize("normalization", ["integral", "component", "norm"])
 @pytest.mark.parametrize("normalize", [True, False])
 def test_upstream_spherical_harmonics_module_and_compile(normalization: str, normalize: bool) -> None:
