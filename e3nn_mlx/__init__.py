@@ -5,6 +5,7 @@ from e3nn_core import Irrep, Irreps, MulIrrep, su2_generators, wigner_3j
 from .backend import MLXBackend, mlx_backend
 from .irreps_array import IrrepsArray
 from .nn_gate import Gate
+from .nn_identity import Identity
 from .nn_linear import Linear
 from .nn_norm import Norm
 from .ops_rotations import (
@@ -63,6 +64,7 @@ __all__ = [
     "FullyConnectedTensorProduct",
     "FromS2Grid",
     "Gate",
+    "Identity",
     "Irrep",
     "Irreps",
     "IrrepsArray",

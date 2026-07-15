@@ -271,6 +271,8 @@ def make_tensor_product_instructions(
             raise TypeError("tensor-product instruction weight flag must be bool")
         if not isinstance(path_weight, (int, float)):
             raise TypeError("tensor-product path_weight must be numeric")
+        if path_weight < 0:
+            raise ValueError("tensor-product path_weight must be non-negative")
         if not 0 <= i_in1 < len(left) or not 0 <= i_in2 < len(right) or not 0 <= i_out < len(output):
             raise IndexError(f"tensor-product instruction index out of range: {instruction!r}")
         part1 = left[i_in1]
@@ -338,7 +340,7 @@ def make_tensor_product_instructions(
             raise ValueError(f"unsupported path normalization {instruction.normalization.path_normalization!r}")
 
         alpha *= out_var_list[instruction.output_index]
-        coefficient = (sqrt(alpha / divisor) if divisor > 0 else 0.0) * path_weight
+        coefficient = sqrt(alpha * path_weight / divisor) if divisor > 0 else 0.0
         out.append(
             TensorProductInstruction(
                 input1_index=instruction.input1_index,

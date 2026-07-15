@@ -238,3 +238,50 @@ def test_upstream_tensor_square_elasticity_output_irreps() -> None:
     first = o3.TensorSquare("1o", compile_left_right=False)
     second = o3.TensorSquare(first.irreps_out, compile_left_right=False)
     assert second.irreps_out.simplify() == o3.Irreps("2x0e + 2x2e + 4e")
+
+
+@pytest.mark.mlx
+def test_upstream_identity_module_and_fully_connected_split_normalization() -> None:
+    mx = mlx_backend._require()
+    identity = o3.Identity("1e + 2e + 3x3o", "1e + 2e + 3x3o")
+    values = mx.random.normal(shape=(7, identity.irreps_in.dim))
+    output = identity(_array(identity.irreps_in, values))
+    assert output.array is values
+    assert bool(mx.all(identity.output_mask))
+    assert identity.parameters() == {}
+    compiled = mx.compile(lambda raw: identity(_array(identity.irreps_in, raw)).array)
+    assert _max_abs(compiled(values) - values) == 0.0
+    with pytest.raises(ValueError, match="equal"):
+        o3.Identity("0e", "0o")
+
+    first = o3.FullyConnectedTensorProduct("10x0e", "10x0e", "0e", compile_left_right=False)
+    split = o3.FullyConnectedTensorProduct("3x0e + 7x0e", "3x0e + 7x0e", "0e", compile_left_right=False)
+    first.update({"weight": mx.ones(first.weight.shape)})
+    split.update({"weight": mx.ones(split.weight.shape)})
+    left = mx.random.normal(shape=(2, 3, 10))
+    right = mx.random.normal(shape=(2, 3, 10))
+    assert _max_abs(first(_array("10x0e", left), _array("10x0e", right)).array - split(_array(split.irreps_in1, left), _array(split.irreps_in2, right)).array) < 2e-6
+
+
+@pytest.mark.mlx
+@pytest.mark.parametrize("normalization", ["component", "norm"])
+def test_upstream_tensor_square_statistical_normalization(normalization: str) -> None:
+    mx = mlx_backend._require()
+    irreps = o3.Irreps("0e + 1e + 2e")
+    square = o3.TensorSquare(irreps, irrep_normalization=normalization, compile_left_right=False)
+    samples = 20_000
+    chunks = []
+    for part in irreps:
+        chunk = mx.random.normal(shape=(samples, part.dim))
+        if normalization == "norm":
+            chunk = chunk / mx.sqrt(mx.sum(chunk * chunk, axis=-1, keepdims=True))
+        chunks.append(chunk)
+    inputs = _array(irreps, mx.concatenate(chunks, axis=-1))
+    output = square(inputs)
+    if normalization == "norm":
+        squared_norms = o3.Norm(square.irreps_out, squared=True)(output).array
+        means = mx.mean(squared_norms, axis=0)
+    else:
+        means = mx.mean(output.array**2, axis=0)
+    assert float(mx.min(means)) > 0.8
+    assert float(mx.max(means)) < 1.2
