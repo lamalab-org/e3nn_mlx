@@ -6,6 +6,7 @@ from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx.compat import require_mlx
 from e3nn_mlx.irreps_array import IrrepsArray
 from e3nn_mlx.nn_linear import Linear
+from e3nn_mlx.nn_gate import Gate
 from e3nn_mlx.nn_norm import Norm
 
 
@@ -84,3 +85,57 @@ def test_nn_value_and_grad_follows_linear_parameter_tree() -> None:
     assert gradients["weight"].shape == linear.weight.shape
     assert gradients["bias"].shape == linear.bias.shape
 
+
+def test_gate_is_parameterless_mlx_module() -> None:
+    _, nn = require_mlx()
+    gate = Gate("0e", "0e", "1o")
+    assert isinstance(gate, nn.Module)
+    assert gate.parameters() == {}
+
+
+def test_odd_gate_changes_output_parity_and_is_inversion_equivariant() -> None:
+    mx, _ = require_mlx()
+    gate = Gate("", "0o", "1o")
+    assert str(gate.irreps_in) == "0o+1o"
+    assert str(gate.irreps_out) == "1e"
+    array = IrrepsArray("0o+1o", mlx_backend.asarray([[0.7, 1.0, -2.0, 3.0]]))
+    inverted_input = IrrepsArray(array.irreps, -array.array)
+    output = gate(array)
+    inverted_output = gate(inverted_input)
+    assert abs(float(mx.max(mx.abs(inverted_output.array - output.array)))) < 1e-6
+
+
+def test_odd_scalar_default_activation_is_inversion_equivariant() -> None:
+    mx, _ = require_mlx()
+    gate = Gate("0o", "", "")
+    positive = gate(IrrepsArray("0o", mlx_backend.asarray([[0.8]])))
+    negative = gate(IrrepsArray("0o", mlx_backend.asarray([[-0.8]])))
+    assert abs(float(mx.max(mx.abs(negative.array + positive.array)))) < 1e-7
+
+
+def test_gate_uses_parity_specific_activations() -> None:
+    gate = Gate(
+        "0e+0o",
+        "0e+0o",
+        "1o+1o",
+        even_scalar_activation=lambda x: x + 1,
+        odd_scalar_activation=lambda x: 2 * x,
+        even_gate_activation=lambda x: 3 * x,
+        odd_gate_activation=lambda x: 4 * x,
+    )
+    array = IrrepsArray(
+        "0e+0o+0e+0o+1o+1o",
+        mlx_backend.asarray([[1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, -1.0, -2.0, -3.0]]),
+    )
+    output = gate(array)
+    assert str(output.irreps) == "0e+0o+1o+1e"
+    assert output.array.tolist() == [[2.0, 4.0, 9.0, 18.0, 27.0, -16.0, -32.0, -48.0]]
+
+
+def test_gate_rejects_invalid_blocks_and_activation_configuration() -> None:
+    with pytest.raises(ValueError, match="must be scalar"):
+        Gate("", "1o", "1o")
+    with pytest.raises(ValueError, match="match the gated multiplicity"):
+        Gate("", "2x0e", "1o")
+    with pytest.raises(ValueError, match="cannot be combined"):
+        Gate("0e", "", "", scalar_activation=lambda x: x, even_scalar_activation=lambda x: x)
