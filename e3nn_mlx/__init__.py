@@ -6,6 +6,9 @@ from .backend import MLXBackend, mlx_backend
 from .irreps_array import IrrepsArray
 from .nn_gate import Gate
 from .nn_identity import Identity
+from .nn_activation import Activation
+from .nn_dropout import Dropout
+from .nn_extract import Extract, ExtractIr
 from .nn_linear import Linear
 from .nn_norm import Norm
 from .ops_rotations import (
@@ -60,6 +63,10 @@ from .ops_tp import (
 
 __all__ = [
     "ElementwiseTensorProduct",
+    "Activation",
+    "Dropout",
+    "Extract",
+    "ExtractIr",
     "FullTensorProduct",
     "FullyConnectedTensorProduct",
     "FromS2Grid",
