@@ -26,6 +26,18 @@ class TensorProductInstruction:
     path_weight: float = 1.0
 
     @property
+    def i_in1(self) -> int:
+        return self.input1_index
+
+    @property
+    def i_in2(self) -> int:
+        return self.input2_index
+
+    @property
+    def i_out(self) -> int:
+        return self.output_index
+
+    @property
     def signature(self) -> tuple[Irrep, Irrep, Irrep, TensorProductMode]:
         return (self.ir_in1, self.ir_in2, self.ir_out, self.mode)
 

@@ -251,7 +251,10 @@ def _numerical_tensor_product(
         ]
     if not output_blocks:
         return IrrepsArray(plan.irreps_out, mx.zeros((*leading_shape, 0), dtype=left.array.dtype))
-    array = mx.concatenate([block.reshape(*leading_shape, -1) for block in output_blocks], axis=-1)
+    array = mx.concatenate(
+        [block.reshape(*leading_shape, part.dim) for block, part in zip(output_blocks, plan.irreps_out, strict=True)],
+        axis=-1,
+    )
     return IrrepsArray(plan.irreps_out, array)
 
 
@@ -316,7 +319,10 @@ class TensorProduct(mlx_module_base()):
             path_normalization=path_normalization,
         )
         self.shared_weights = shared_weights
-        self.internal_weights = any(ins[4] for ins in instructions) if internal_weights is None else internal_weights
+        if internal_weights is None:
+            self.internal_weights = any(ins[4] for ins in instructions) and shared_weights
+        else:
+            self.internal_weights = internal_weights
         if self.internal_weights and not self.shared_weights:
             raise ValueError("internal_weights=True requires shared_weights=True")
         self._weighted_instruction_meta: list[WeightedInstruction] = []
@@ -458,6 +464,8 @@ def _group_output_irreps(irreps: Irreps) -> tuple[Irreps, tuple[tuple[int, ...],
 
 def _regroup_output_array(array: IrrepsArray, irreps_out: Irreps, index_groups: tuple[tuple[int, ...], ...]) -> IrrepsArray:
     mx, _ = require_mlx()
+    if not irreps_out:
+        return IrrepsArray(irreps_out, mx.zeros((*array.leading_shape, 0), dtype=array.dtype))
     chunks = array.chunk_arrays()
     regrouped_chunks = []
     for part, indices in zip(irreps_out, index_groups, strict=True):
@@ -466,7 +474,7 @@ def _regroup_output_array(array: IrrepsArray, irreps_out: Irreps, index_groups: 
             for index in indices
         ]
         regrouped = mx.concatenate(merged, axis=-2) if len(merged) > 1 else merged[0]
-        regrouped_chunks.append(regrouped.reshape(*array.leading_shape, -1))
+        regrouped_chunks.append(regrouped.reshape(*array.leading_shape, part.dim))
     return IrrepsArray.from_chunks(irreps_out, regrouped_chunks, backend=mx)
 
 

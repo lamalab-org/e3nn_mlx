@@ -204,7 +204,13 @@ class Linear(mlx_module_base()):
                 bias_cursor += width
         if not outputs:
             return mx.zeros((*input_array.leading_shape, 0), dtype=array.dtype)
-        return mx.concatenate([out.reshape(*input_array.leading_shape, -1) for out in outputs], axis=-1)
+        return mx.concatenate(
+            [
+                out.reshape(*input_array.leading_shape, part.dim)
+                for out, part in zip(outputs, self.irreps_out, strict=True)
+            ],
+            axis=-1,
+        )
 
     def __call__(
         self,
