@@ -22,17 +22,16 @@ class TensorProductInstruction:
     mode: TensorProductMode
     path_shape: tuple[int, ...]
     normalization: NormalizationMetadata
+    has_weight: bool = False
+    path_weight: float = 1.0
 
     @property
     def signature(self) -> tuple[Irrep, Irrep, Irrep, TensorProductMode]:
         return (self.ir_in1, self.ir_in2, self.ir_out, self.mode)
 
 
-def _resolve_output_part(output_irreps: Irreps, ir_out: Irrep) -> tuple[int, MulIrrep] | None:
-    for index, part in enumerate(output_irreps):
-        if part.ir == ir_out and part.mul > 0:
-            return index, part
-    return None
+def _resolve_output_parts(output_irreps: Irreps, ir_out: Irrep) -> tuple[tuple[int, MulIrrep], ...]:
+    return tuple((index, part) for index, part in enumerate(output_irreps) if part.ir == ir_out and part.mul > 0)
 
 
 def _infer_output_mul(mode: TensorProductMode, mul1: int, mul2: int, explicit_out_mul: int | None) -> int:
@@ -123,9 +122,9 @@ def generate_tensor_product_instructions(
     irrep_normalization: str = "component",
     path_normalization: str = "element",
 ) -> tuple[TensorProductInstruction, ...]:
-    left = Irreps(irreps_in1).simplify()
-    right = Irreps(irreps_in2).simplify()
-    output = None if irreps_out is None else Irreps(irreps_out).simplify()
+    left = Irreps(irreps_in1).remove_zero_multiplicities()
+    right = Irreps(irreps_in2).remove_zero_multiplicities()
+    output = None if irreps_out is None else Irreps(irreps_out).remove_zero_multiplicities()
 
     instructions: list[TensorProductInstruction] = []
     if path_normalization == "component":
@@ -135,32 +134,37 @@ def generate_tensor_product_instructions(
         for i_in2, part2 in enumerate(right):
             candidates = part1.ir * part2.ir
             for ir_out in candidates:
-                resolved = (None if output is None else _resolve_output_part(output, ir_out))
-                if output is not None and resolved is None:
+                resolved_parts: tuple[tuple[int, MulIrrep] | None, ...]
+                if output is None:
+                    resolved_parts = (None,)
+                else:
+                    resolved_parts = _resolve_output_parts(output, ir_out)
+                if not resolved_parts:
                     continue
-                out_index = len(instructions) if resolved is None else resolved[0]
-                explicit_out_mul = None if resolved is None else resolved[1].mul
-                out_mul = _infer_output_mul(mode, part1.mul, part2.mul, explicit_out_mul)
-                _validate_mode(mode, part1.mul, part2.mul, out_mul)
-                out_part = MulIrrep(out_mul, ir_out)
-                instructions.append(
-                    TensorProductInstruction(
-                        input1_index=i_in1,
-                        input2_index=i_in2,
-                        output_index=out_index,
-                        ir_in1=part1.ir,
-                        ir_in2=part2.ir,
-                        ir_out=ir_out,
-                        mode=mode,
-                        path_shape=_path_shape(mode, part1.mul, part2.mul, out_part.mul),
-                        normalization=NormalizationMetadata(
-                            irrep_normalization=irrep_normalization,
-                            path_normalization=path_normalization,
-                            num_paths=part1.mul * part2.mul,
-                            num_elements=_num_elements(mode, part1.mul, part2.mul, out_part.mul),
+                for resolved in resolved_parts:
+                    out_index = len(instructions) if resolved is None else resolved[0]
+                    explicit_out_mul = None if resolved is None else resolved[1].mul
+                    out_mul = _infer_output_mul(mode, part1.mul, part2.mul, explicit_out_mul)
+                    _validate_mode(mode, part1.mul, part2.mul, out_mul)
+                    out_part = MulIrrep(out_mul, ir_out)
+                    instructions.append(
+                        TensorProductInstruction(
+                            input1_index=i_in1,
+                            input2_index=i_in2,
+                            output_index=out_index,
+                            ir_in1=part1.ir,
+                            ir_in2=part2.ir,
+                            ir_out=ir_out,
+                            mode=mode,
+                            path_shape=_path_shape(mode, part1.mul, part2.mul, out_part.mul),
+                            normalization=NormalizationMetadata(
+                                irrep_normalization=irrep_normalization,
+                                path_normalization=path_normalization,
+                                num_paths=part1.mul * part2.mul,
+                                num_elements=_num_elements(mode, part1.mul, part2.mul, out_part.mul),
+                            ),
                         ),
                     )
-                )
 
     path_counts = {instruction.output_index: 0 for instruction in instructions}
     path_elements = {instruction.output_index: 0 for instruction in instructions}
@@ -205,6 +209,8 @@ def generate_tensor_product_instructions(
                     num_elements=instruction.normalization.num_elements,
                     coefficient=coefficient,
                 ),
+                has_weight=instruction.has_weight,
+                path_weight=instruction.path_weight,
             )
         )
     return tuple(normalized)
@@ -222,9 +228,9 @@ def make_tensor_product_instructions(
     in2_var: Iterable[float] | None = None,
     out_var: Iterable[float] | None = None,
 ) -> tuple[TensorProductInstruction, ...]:
-    left = Irreps(irreps_in1).simplify()
-    right = Irreps(irreps_in2).simplify()
-    output = Irreps(irreps_out).simplify()
+    left = Irreps(irreps_in1).remove_zero_multiplicities()
+    right = Irreps(irreps_in2).remove_zero_multiplicities()
+    output = Irreps(irreps_out).remove_zero_multiplicities()
     raw: list[TensorProductInstruction] = []
     path_weights: list[float] = []
 
@@ -243,10 +249,18 @@ def make_tensor_product_instructions(
 
     for instruction in instructions:
         if len(instruction) == 5:
-            i_in1, i_in2, i_out, mode, _has_weight = instruction
+            i_in1, i_in2, i_out, mode, has_weight = instruction
             path_weight = 1.0
         else:
-            i_in1, i_in2, i_out, mode, _has_weight, path_weight = instruction
+            i_in1, i_in2, i_out, mode, has_weight, path_weight = instruction
+        if not isinstance(i_in1, int) or not isinstance(i_in2, int) or not isinstance(i_out, int):
+            raise TypeError("tensor-product instruction indices must be integers")
+        if not isinstance(has_weight, bool):
+            raise TypeError("tensor-product instruction weight flag must be bool")
+        if not isinstance(path_weight, (int, float)):
+            raise TypeError("tensor-product path_weight must be numeric")
+        if not 0 <= i_in1 < len(left) or not 0 <= i_in2 < len(right) or not 0 <= i_out < len(output):
+            raise IndexError(f"tensor-product instruction index out of range: {instruction!r}")
         part1 = left[i_in1]
         part2 = right[i_in2]
         part_out = output[i_out]
@@ -270,6 +284,8 @@ def make_tensor_product_instructions(
                     path_normalization=path_normalization,
                     num_elements=_num_elements(mode, part1.mul, part2.mul, part_out.mul),
                 ),
+                has_weight=has_weight,
+                path_weight=float(path_weight),
             )
         )
         path_weights.append(path_weight)
@@ -328,6 +344,8 @@ def make_tensor_product_instructions(
                     num_elements=instruction.normalization.num_elements,
                     coefficient=coefficient,
                 ),
+                has_weight=instruction.has_weight,
+                path_weight=instruction.path_weight,
             )
         )
     return tuple(out)

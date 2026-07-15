@@ -10,6 +10,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+mlx = ["mlx>=0.31,<0.33"]
+test = ["pytest>=9,<10", "numpy>=2.3,<3"]
+reference = ["e3nn==0.5.8", "numpy==2.3.1", "torch==2.7.1"]
+
+[tool.pytest.ini_options]
+markers = [
+  "mlx: requires a working MLX runtime",
+  "e3nn_reference: requires the pinned upstream e3nn reference environment",
+]
+
 [tool.setuptools]
 include-package-data = true
 

@@ -201,10 +201,29 @@ def _numerical_tensor_product(
         raise ValueError("weights presence does not match plan.weighted")
     if left.irreps != plan.irreps_in1 or right.irreps != plan.irreps_in2:
         raise ValueError("input irreps do not match tensor product plan")
+    if left.dtype != right.dtype:
+        raise TypeError(f"tensor product inputs must have matching dtypes, got {left.dtype} and {right.dtype}")
+    if weights is not None:
+        if weights.ndim < 1 or weights.shape[-1] != plan.weight_numel:
+            raise ValueError(f"expected weight shape (..., {plan.weight_numel}), got {tuple(weights.shape)}")
+        weight_leading_shape = tuple(int(size) for size in weights.shape[:-1])
+    else:
+        weight_leading_shape = ()
+    try:
+        leading_shape = mx.broadcast_shapes(left.leading_shape, right.leading_shape, weight_leading_shape)
+    except ValueError as exc:
+        raise ValueError(
+            f"tensor product leading shapes are not broadcastable: {left.leading_shape}, "
+            f"{right.leading_shape}, {weight_leading_shape}"
+        ) from exc
+    if left.leading_shape != leading_shape:
+        left = IrrepsArray(left.irreps, mx.broadcast_to(left.array, (*leading_shape, left.irreps.dim)))
+    if right.leading_shape != leading_shape:
+        right = IrrepsArray(right.irreps, mx.broadcast_to(right.array, (*leading_shape, right.irreps.dim)))
 
     left_chunks = left.chunk_arrays()
     right_chunks = right.chunk_arrays()
-    output_blocks = [mx.zeros((*left.leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype) for part in plan.irreps_out]
+    output_blocks = [mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype) for part in plan.irreps_out]
     grouped_outputs: list[list[Any]] = [[] for _ in plan.irreps_out]
     weighted_lookup = {instruction_index: weight_slice for instruction_index, weight_slice in zip(plan.weighted_instruction_indices, plan.weight_slices, strict=True)}
     for instruction_index, inst in enumerate(plan.instructions):
@@ -227,12 +246,12 @@ def _numerical_tensor_product(
 
     if weights is None:
         output_blocks = [
-            mx.concatenate(blocks, axis=-2) if blocks else mx.zeros((*left.leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype)
+            mx.concatenate(blocks, axis=-2) if blocks else mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype)
             for part, blocks in zip(plan.irreps_out, grouped_outputs, strict=True)
         ]
     if not output_blocks:
-        return IrrepsArray(plan.irreps_out, mx.zeros((*left.leading_shape, 0), dtype=left.array.dtype))
-    array = mx.concatenate([block.reshape(*left.leading_shape, -1) for block in output_blocks], axis=-1)
+        return IrrepsArray(plan.irreps_out, mx.zeros((*leading_shape, 0), dtype=left.array.dtype))
+    array = mx.concatenate([block.reshape(*leading_shape, -1) for block in output_blocks], axis=-1)
     return IrrepsArray(plan.irreps_out, array)
 
 
@@ -281,9 +300,9 @@ class TensorProduct:
         compile_left_right: bool = True,
     ) -> None:
         mx, _ = require_mlx()
-        self.irreps_in1 = Irreps(irreps_in1).simplify()
-        self.irreps_in2 = Irreps(irreps_in2).simplify()
-        self.irreps_out = Irreps(irreps_out).simplify()
+        self.irreps_in1 = Irreps(irreps_in1).remove_zero_multiplicities()
+        self.irreps_in2 = Irreps(irreps_in2).remove_zero_multiplicities()
+        self.irreps_out = Irreps(irreps_out).remove_zero_multiplicities()
         self.instructions = make_tensor_product_instructions(
             self.irreps_in1,
             self.irreps_in2,
@@ -302,7 +321,7 @@ class TensorProduct:
         self._weighted_instruction_meta: list[WeightedInstruction] = []
         start = 0
         for index, (raw_instruction, normalized) in enumerate(zip(instructions, self.instructions, strict=True)):
-            has_weight = raw_instruction[4]
+            has_weight = normalized.has_weight
             if not has_weight:
                 continue
             size = prod(normalized.path_shape)
@@ -364,6 +383,10 @@ class TensorProduct:
         return weight
 
     def __call__(self, left: IrrepsArray, right: IrrepsArray, weight: Any | None = None) -> IrrepsArray:
+        if left.irreps != self.irreps_in1:
+            raise ValueError(f"left input irreps {left.irreps} do not match {self.irreps_in1}")
+        if right.irreps != self.irreps_in2:
+            raise ValueError(f"right input irreps {right.irreps} do not match {self.irreps_in2}")
         resolved_weight = self._get_weight(weight)
         return IrrepsArray(self.irreps_out, self._compiled(left.array, right.array, resolved_weight))
 

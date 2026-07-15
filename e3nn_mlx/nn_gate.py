@@ -18,9 +18,9 @@ class Gate:
         scalar_activation=None,
         gate_activation=None,
     ) -> None:
-        self.irreps_scalars = Irreps(irreps_scalars).simplify()
-        self.irreps_gates = Irreps(irreps_gates).simplify()
-        self.irreps_gated = Irreps(irreps_gated).simplify()
+        self.irreps_scalars = Irreps(irreps_scalars).remove_zero_multiplicities()
+        self.irreps_gates = Irreps(irreps_gates).remove_zero_multiplicities()
+        self.irreps_gated = Irreps(irreps_gated).remove_zero_multiplicities()
         if len(self.irreps_gates) != len(self.irreps_gated):
             raise ValueError("irreps_gates and irreps_gated must have the same number of blocks")
         for gate_part, gated_part in zip(self.irreps_gates, self.irreps_gated, strict=True):

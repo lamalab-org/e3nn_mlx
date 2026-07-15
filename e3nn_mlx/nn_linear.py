@@ -26,8 +26,8 @@ class _LinearInstruction:
 class Linear:
     def __init__(self, irreps_in: Irreps | str, irreps_out: Irreps | str, *, bias: bool = True, compile: bool = False) -> None:
         mx, _ = require_mlx()
-        self.irreps_in = Irreps(irreps_in).simplify()
-        self.irreps_out = Irreps(irreps_out).simplify()
+        self.irreps_in = Irreps(irreps_in).remove_zero_multiplicities()
+        self.irreps_out = Irreps(irreps_out).remove_zero_multiplicities()
         instructions = []
         start = 0
         for output_index, out_part in enumerate(self.irreps_out):

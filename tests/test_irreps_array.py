@@ -30,3 +30,14 @@ def test_irreps_array_from_chunks_round_trip() -> None:
     assert irreps_array.shape == (1, 7)
     assert chunk_arrays[0].tolist() == [[1.0]]
     assert chunk_arrays[1].tolist() == [[2.0, 3.0, 4.0, 5.0, 6.0, 7.0]]
+
+
+@pytest.mark.mlx
+def test_irreps_array_regroup_reorders_data_with_metadata() -> None:
+    irreps_array = IrrepsArray(
+        "1o+0e+2x1o",
+        mlx_backend.asarray([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]),
+    )
+    regrouped = irreps_array.regroup()
+    assert str(regrouped.irreps) == "0e+3x1o"
+    assert regrouped.array.tolist() == [[4.0, 1.0, 2.0, 3.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]

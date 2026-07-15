@@ -7,6 +7,8 @@ from typing import Any
 
 from e3nn_core.irreps import Irrep, Irreps
 
+from .compat import require_mlx
+
 
 @dataclass(frozen=True, slots=True)
 class IrrepsChunk:
@@ -27,7 +29,7 @@ class IrrepsArray:
     chunks: tuple[IrrepsChunk, ...]
 
     def __init__(self, irreps: Irreps | str, array: Any) -> None:
-        parsed = Irreps(irreps).simplify()
+        parsed = Irreps(irreps).remove_zero_multiplicities()
         shape = tuple(int(dim) for dim in array.shape)
         if not shape:
             raise ValueError("IrrepsArray requires at least one array dimension")
@@ -40,7 +42,7 @@ class IrrepsArray:
 
     @classmethod
     def from_chunks(cls, irreps: Irreps | str, chunks: list[Any] | tuple[Any, ...], *, backend: Any) -> IrrepsArray:
-        parsed = Irreps(irreps).simplify()
+        parsed = Irreps(irreps).remove_zero_multiplicities()
         expected = _build_chunks(parsed)
         if len(chunks) != len(expected):
             raise ValueError(f"expected {len(expected)} chunks, got {len(chunks)}")
@@ -68,7 +70,13 @@ class IrrepsArray:
         return IrrepsArray(self.irreps, array)
 
     def regroup(self) -> IrrepsArray:
-        return IrrepsArray(self.irreps.regroup(), self.array)
+        if not self.chunks:
+            return self
+        mx, _ = require_mlx()
+        sorted_result = self.irreps.sort()
+        arrays = self.chunk_arrays()
+        reordered = mx.concatenate([arrays[index] for index in sorted_result.inv], axis=-1)
+        return IrrepsArray(sorted_result.irreps.simplify(), reordered)
 
     def simplify(self) -> IrrepsArray:
         return IrrepsArray(self.irreps.simplify(), self.array)
