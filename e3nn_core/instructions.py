@@ -218,6 +218,9 @@ def make_tensor_product_instructions(
     *,
     irrep_normalization: str = "component",
     path_normalization: str = "element",
+    in1_var: Iterable[float] | None = None,
+    in2_var: Iterable[float] | None = None,
+    out_var: Iterable[float] | None = None,
 ) -> tuple[TensorProductInstruction, ...]:
     left = Irreps(irreps_in1).simplify()
     right = Irreps(irreps_in2).simplify()
@@ -227,6 +230,16 @@ def make_tensor_product_instructions(
 
     if path_normalization == "component":
         path_normalization = "element"
+
+    in1_var_list = [1.0 for _ in range(len(left))] if in1_var is None else [float(value) for value in in1_var]
+    in2_var_list = [1.0 for _ in range(len(right))] if in2_var is None else [float(value) for value in in2_var]
+    out_var_list = [1.0 for _ in range(len(output))] if out_var is None else [float(value) for value in out_var]
+    if len(in1_var_list) != len(left):
+        raise ValueError("len(in1_var) must equal len(irreps_in1)")
+    if len(in2_var_list) != len(right):
+        raise ValueError("len(in2_var) must equal len(irreps_in2)")
+    if len(out_var_list) != len(output):
+        raise ValueError("len(out_var) must equal len(irreps_out)")
 
     for instruction in instructions:
         if len(instruction) == 5:
@@ -279,14 +292,24 @@ def make_tensor_product_instructions(
             raise ValueError(f"unsupported irrep normalization {instruction.normalization.irrep_normalization!r}")
 
         if instruction.normalization.path_normalization == "element":
-            divisor = path_elements[instruction.output_index]
+            divisor = sum(
+                in1_var_list[other.input1_index] * in2_var_list[other.input2_index] * other.normalization.num_elements
+                for other in raw
+                if other.output_index == instruction.output_index
+            )
         elif instruction.normalization.path_normalization == "path":
-            divisor = instruction.normalization.num_elements * path_counts[instruction.output_index]
+            divisor = (
+                in1_var_list[instruction.input1_index]
+                * in2_var_list[instruction.input2_index]
+                * instruction.normalization.num_elements
+                * path_counts[instruction.output_index]
+            )
         elif instruction.normalization.path_normalization == "none":
             divisor = 1
         else:
             raise ValueError(f"unsupported path normalization {instruction.normalization.path_normalization!r}")
 
+        alpha *= out_var_list[instruction.output_index]
         coefficient = (sqrt(alpha / divisor) if divisor > 0 else 0.0) * path_weight
         out.append(
             TensorProductInstruction(

@@ -5,6 +5,7 @@ import math
 import pytest
 
 from e3nn_core.cg import clebsch_gordan
+from e3nn_core.instructions import make_tensor_product_instructions
 from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx.irreps_array import IrrepsArray
 from e3nn_mlx.ops_tp import TensorProduct, compile_tensor_product, tensor_product, tensor_product_plan
@@ -340,3 +341,61 @@ def test_tensor_product_right_with_unshared_weights() -> None:
     forward = tp(left, right, weight=weights)
     mx.eval(via_right)
     assert abs(float((via_right - forward.array).abs().max())) < 1e-6
+
+
+def test_tensor_product_module_variance_arguments_affect_normalization() -> None:
+    instructions_default = make_tensor_product_instructions(
+        "2x0e",
+        "3x0e",
+        "2x0e",
+        [
+            (0, 0, 0, "uvu", False),
+        ],
+    )
+    instructions_scaled = make_tensor_product_instructions(
+        "2x0e",
+        "3x0e",
+        "2x0e",
+        [
+            (0, 0, 0, "uvu", False),
+        ],
+        in1_var=[4.0],
+        in2_var=[9.0],
+        out_var=[16.0],
+    )
+    coeff_default = instructions_default[0].normalization.coefficient
+    coeff_scaled = instructions_scaled[0].normalization.coefficient
+    assert abs(coeff_default - (1.0 / math.sqrt(3.0))) < 1e-12
+    assert abs(coeff_scaled - (4.0 / math.sqrt(108.0))) < 1e-12
+
+
+@pytest.mark.mlx
+def test_tensor_product_module_variance_arguments_change_output_scale() -> None:
+    left = IrrepsArray("2x0e", mlx_backend.asarray([[2.0, 3.0]]))
+    right = IrrepsArray("3x0e", mlx_backend.asarray([[5.0, 7.0, 11.0]]))
+    tp_default = TensorProduct(
+        "2x0e",
+        "3x0e",
+        "2x0e",
+        [
+            (0, 0, 0, "uvu", False),
+        ],
+        internal_weights=False,
+    )
+    tp_scaled = TensorProduct(
+        "2x0e",
+        "3x0e",
+        "2x0e",
+        [
+            (0, 0, 0, "uvu", False),
+        ],
+        in1_var=[4.0],
+        in2_var=[9.0],
+        out_var=[16.0],
+        internal_weights=False,
+    )
+    out_default = tp_default(left, right)
+    out_scaled = tp_scaled(left, right)
+    ratio = tp_scaled.instructions[0].normalization.coefficient / tp_default.instructions[0].normalization.coefficient
+    expected = [[ratio * value for value in out_default.array.tolist()[0]]]
+    assert max(abs(a - b) for row_a, row_b in zip(out_scaled.array.tolist(), expected, strict=True) for a, b in zip(row_a, row_b, strict=True)) < 1e-5

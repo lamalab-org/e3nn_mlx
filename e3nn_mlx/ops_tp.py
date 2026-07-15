@@ -271,6 +271,9 @@ class TensorProduct:
         irreps_out: Irreps | str,
         instructions: list[tuple[int, int, int, str, bool] | tuple[int, int, int, str, bool, float]],
         *,
+        in1_var: list[float] | None = None,
+        in2_var: list[float] | None = None,
+        out_var: list[float] | None = None,
         irrep_normalization: str = "component",
         path_normalization: str = "element",
         internal_weights: bool | None = None,
@@ -286,6 +289,9 @@ class TensorProduct:
             self.irreps_in2,
             self.irreps_out,
             instructions,
+            in1_var=in1_var,
+            in2_var=in2_var,
+            out_var=out_var,
             irrep_normalization=irrep_normalization,
             path_normalization=path_normalization,
         )
@@ -323,7 +329,7 @@ class TensorProduct:
 
     def __repr__(self) -> str:
         path_count = sum(prod(ins.path_shape) for ins in self.instructions)
-        return f"TensorProduct({self.irreps_in1} x {self.irreps_in2} -> {self.irreps_out} | {path_count} paths | {self.weight_numel} weights)"
+        return f"{self.__class__.__name__}({self.irreps_in1} x {self.irreps_in2} -> {self.irreps_out} | {path_count} paths | {self.weight_numel} weights)"
 
     def _plan(self, weighted: bool) -> TensorProductPlan:
         weight_slices = tuple(meta.weight_slice for meta in self._weighted_instruction_meta)
@@ -385,3 +391,381 @@ class TensorProduct:
     def weight_views(self, weight: Any | None = None):
         for meta in self._weighted_instruction_meta:
             yield self.weight_view_for_instruction(meta.instruction_index, weight=weight)
+
+
+def _as_irreps_list(irreps: Irreps | str) -> list[MulIrrep]:
+    return list(Irreps(irreps).simplify())
+
+
+def _split_elementwise_inputs(irreps_in1: Irreps, irreps_in2: Irreps) -> tuple[Irreps, Irreps]:
+    parts1 = list(irreps_in1)
+    parts2 = list(irreps_in2)
+    if irreps_in1.num_irreps != irreps_in2.num_irreps:
+        raise ValueError("ElementwiseTensorProduct requires irreps_in1.num_irreps == irreps_in2.num_irreps")
+    i = 0
+    while i < len(parts1):
+        part1 = parts1[i]
+        part2 = parts2[i]
+        if part1.mul < part2.mul:
+            parts2[i] = MulIrrep(part1.mul, part2.ir)
+            parts2.insert(i + 1, MulIrrep(part2.mul - part1.mul, part2.ir))
+        elif part2.mul < part1.mul:
+            parts1[i] = MulIrrep(part2.mul, part1.ir)
+            parts1.insert(i + 1, MulIrrep(part1.mul - part2.mul, part1.ir))
+        i += 1
+    return Irreps(parts1), Irreps(parts2)
+
+
+def _group_output_irreps(irreps: Irreps) -> tuple[Irreps, tuple[tuple[int, ...], ...]]:
+    grouped: dict[Irrep, list[int]] = {}
+    multiplicities: dict[Irrep, int] = {}
+    for index, part in enumerate(irreps):
+        grouped.setdefault(part.ir, []).append(index)
+        multiplicities[part.ir] = multiplicities.get(part.ir, 0) + part.mul
+    ordered_irreps = sorted(grouped, key=lambda ir: (ir.l, ir.p))
+    grouped_irreps = Irreps(MulIrrep(multiplicities[ir], ir) for ir in ordered_irreps)
+    index_groups = tuple(tuple(grouped[ir]) for ir in ordered_irreps)
+    return grouped_irreps, index_groups
+
+
+def _regroup_output_array(array: IrrepsArray, irreps_out: Irreps, index_groups: tuple[tuple[int, ...], ...]) -> IrrepsArray:
+    mx, _ = require_mlx()
+    chunks = array.chunk_arrays()
+    regrouped_chunks = []
+    for part, indices in zip(irreps_out, index_groups, strict=True):
+        merged = [
+            _reshape_chunk(chunks[index], array.irreps[index].mul, part.ir.dim)
+            for index in indices
+        ]
+        regrouped = mx.concatenate(merged, axis=-2) if len(merged) > 1 else merged[0]
+        regrouped_chunks.append(regrouped.reshape(*array.leading_shape, -1))
+    return IrrepsArray.from_chunks(irreps_out, regrouped_chunks, backend=mx)
+
+
+def _explicit_mul_repr(irreps: Irreps) -> str:
+    return "+".join(f"{part.mul}x{part.ir}" for part in irreps)
+
+
+class FullyConnectedTensorProduct(TensorProduct):
+    def __init__(
+        self,
+        irreps_in1: Irreps | str,
+        irreps_in2: Irreps | str,
+        irreps_out: Irreps | str,
+        *,
+        irrep_normalization: str = "component",
+        path_normalization: str = "element",
+        internal_weights: bool | None = None,
+        shared_weights: bool = True,
+        in1_var: list[float] | None = None,
+        in2_var: list[float] | None = None,
+        out_var: list[float] | None = None,
+        compile_left_right: bool = True,
+    ) -> None:
+        left = Irreps(irreps_in1).simplify()
+        right = Irreps(irreps_in2).simplify()
+        output = Irreps(irreps_out).simplify()
+        instructions = [
+            (i1, i2, i_out, "uvw", True, 1.0)
+            for i1, part1 in enumerate(left)
+            for i2, part2 in enumerate(right)
+            for i_out, part_out in enumerate(output)
+            if part_out.ir in (part1.ir * part2.ir)
+        ]
+        super().__init__(
+            left,
+            right,
+            output,
+            instructions,
+            in1_var=in1_var,
+            in2_var=in2_var,
+            out_var=out_var,
+            irrep_normalization=irrep_normalization,
+            path_normalization=path_normalization,
+            internal_weights=internal_weights,
+            shared_weights=shared_weights,
+            compile_left_right=compile_left_right,
+        )
+
+
+class ElementwiseTensorProduct(TensorProduct):
+    def __init__(
+        self,
+        irreps_in1: Irreps | str,
+        irreps_in2: Irreps | str,
+        filter_ir_out: list[Irrep | str] | None = None,
+        *,
+        irrep_normalization: str = "component",
+        path_normalization: str = "element",
+        compile_left_right: bool = True,
+    ) -> None:
+        left = Irreps(irreps_in1).simplify()
+        right = Irreps(irreps_in2).simplify()
+        left, right = _split_elementwise_inputs(left, right)
+        if filter_ir_out is not None:
+            filter_ir_out = [Irrep.parse(ir) for ir in filter_ir_out]
+        output_parts: list[MulIrrep] = []
+        instructions: list[tuple[int, int, int, str, bool]] = []
+        for i, (part1, part2) in enumerate(zip(left, right, strict=True)):
+            for ir_out in part1.ir * part2.ir:
+                if filter_ir_out is not None and ir_out not in filter_ir_out:
+                    continue
+                i_out = len(output_parts)
+                output_parts.append(MulIrrep(part1.mul, ir_out))
+                instructions.append((i, i, i_out, "uuu", False))
+        super().__init__(
+            left,
+            right,
+            Irreps(output_parts),
+            instructions,
+            irrep_normalization=irrep_normalization,
+            path_normalization=path_normalization,
+            internal_weights=False,
+            shared_weights=True,
+            compile_left_right=compile_left_right,
+        )
+
+
+class FullTensorProduct(TensorProduct):
+    def __init__(
+        self,
+        irreps_in1: Irreps | str,
+        irreps_in2: Irreps | str,
+        filter_ir_out: list[Irrep | str] | None = None,
+        *,
+        irrep_normalization: str = "component",
+        path_normalization: str = "element",
+        compile_left_right: bool = True,
+    ) -> None:
+        left = Irreps(irreps_in1).simplify()
+        right = Irreps(irreps_in2).simplify()
+        self._execution_irreps_out: Irreps | None = None
+        self._output_index_groups: tuple[tuple[int, ...], ...] | None = None
+        if filter_ir_out is not None:
+            filter_ir_out = [Irrep.parse(ir) for ir in filter_ir_out]
+        output_parts: list[MulIrrep] = []
+        instructions: list[tuple[int, int, int, str, bool]] = []
+        for i1, part1 in enumerate(left):
+            for i2, part2 in enumerate(right):
+                for ir_out in part1.ir * part2.ir:
+                    if filter_ir_out is not None and ir_out not in filter_ir_out:
+                        continue
+                    i_out = len(output_parts)
+                    output_parts.append(MulIrrep(part1.mul * part2.mul, ir_out))
+                    instructions.append((i1, i2, i_out, "uvuv", False))
+        output = Irreps(output_parts)
+        super().__init__(
+            left,
+            right,
+            output,
+            instructions,
+            irrep_normalization=irrep_normalization,
+            path_normalization=path_normalization,
+            internal_weights=False,
+            shared_weights=True,
+            compile_left_right=compile_left_right,
+        )
+        self._execution_irreps_out = self.irreps_out
+        grouped_out, index_groups = _group_output_irreps(self._execution_irreps_out)
+        self.irreps_out = grouped_out
+        self._output_index_groups = index_groups
+        mx, _ = require_mlx()
+        grouped_mask = _regroup_output_array(
+            IrrepsArray(self._execution_irreps_out, self.output_mask[None, :]),
+            self.irreps_out,
+            self._output_index_groups,
+        )
+        self.output_mask = mx.maximum(grouped_mask.array[0], 0.0)
+
+    def __repr__(self) -> str:
+        path_count = sum(prod(ins.path_shape) for ins in self.instructions)
+        return (
+            f"FullTensorProduct({_explicit_mul_repr(self.irreps_in1)} x {_explicit_mul_repr(self.irreps_in2)} -> "
+            f"{_explicit_mul_repr(self.irreps_out)} | {path_count} paths | {self.weight_numel} weights)"
+        )
+
+    def _plan(self, weighted: bool) -> TensorProductPlan:
+        plan = super()._plan(weighted)
+        return TensorProductPlan(
+            irreps_in1=plan.irreps_in1,
+            irreps_in2=plan.irreps_in2,
+            irreps_out=self._execution_irreps_out,
+            instructions=plan.instructions,
+            weighted=plan.weighted,
+            weight_numel=plan.weight_numel,
+            weighted_instruction_indices=plan.weighted_instruction_indices,
+            weight_slices=plan.weight_slices,
+        )
+
+    def __call__(self, left: IrrepsArray, right: IrrepsArray, weight: Any | None = None) -> IrrepsArray:
+        out = IrrepsArray(self._execution_irreps_out, self._compiled(left.array, right.array, None))
+        return _regroup_output_array(out, self.irreps_out, self._output_index_groups)
+
+
+def _tensor_square_full_instructions(
+    irreps_in: Irreps,
+    filter_ir_out: list[Irrep] | None,
+    irrep_normalization: str,
+) -> tuple[Irreps, list[tuple[int, int, int, str, bool, float]]]:
+    output_parts: list[MulIrrep] = []
+    instructions: list[tuple[int, int, int, str, bool, float]] = []
+    for i1, part1 in enumerate(irreps_in):
+        for i2, part2 in enumerate(irreps_in):
+            for ir_out in part1.ir * part2.ir:
+                if filter_ir_out is not None and ir_out not in filter_ir_out:
+                    continue
+                alpha = _tensor_square_alpha(part1.ir, part2.ir, ir_out, irrep_normalization)
+                if i1 < i2:
+                    i_out = len(output_parts)
+                    output_parts.append(MulIrrep(part1.mul * part2.mul, ir_out))
+                    instructions.append((i1, i2, i_out, "uvuv", False, alpha))
+                elif i1 == i2:
+                    mul = part1.mul
+                    if mul > 1:
+                        i_out = len(output_parts)
+                        output_parts.append(MulIrrep(mul * (mul - 1) // 2, ir_out))
+                        instructions.append((i1, i1, i_out, "uvu<v", False, alpha))
+                    if ir_out.l % 2 == 0:
+                        even_alpha = _tensor_square_diagonal_alpha(part1.ir, ir_out, irrep_normalization)
+                        i_out = len(output_parts)
+                        output_parts.append(MulIrrep(mul, ir_out))
+                        instructions.append((i1, i1, i_out, "uuu", False, even_alpha))
+    output = Irreps(output_parts)
+    return output, instructions
+
+
+def _tensor_square_fc_instructions(
+    irreps_in: Irreps,
+    irreps_out: Irreps,
+    irrep_normalization: str,
+) -> list[tuple[int, int, int, str, bool, float]]:
+    instructions: list[tuple[int, int, int, str, bool, float]] = []
+    for i1, part1 in enumerate(irreps_in):
+        for i2, part2 in enumerate(irreps_in):
+            for i_out, part_out in enumerate(irreps_out):
+                if part_out.ir not in (part1.ir * part2.ir):
+                    continue
+                alpha = _tensor_square_alpha(part1.ir, part2.ir, part_out.ir, irrep_normalization)
+                if i1 < i2:
+                    instructions.append((i1, i2, i_out, "uvw", True, alpha))
+                elif i1 == i2:
+                    if part1.mul > 1:
+                        instructions.append((i1, i1, i_out, "u<vw", True, alpha))
+                    if part_out.ir.l % 2 == 0:
+                        even_alpha = _tensor_square_diagonal_alpha(part1.ir, part_out.ir, irrep_normalization)
+                        instructions.append((i1, i1, i_out, "uuw", True, even_alpha))
+    return instructions
+
+
+def _tensor_square_alpha(ir1: Irrep, ir2: Irrep, ir_out: Irrep, irrep_normalization: str) -> float:
+    if irrep_normalization == "component":
+        return float(ir_out.dim)
+    if irrep_normalization == "norm":
+        return float(ir1.dim * ir2.dim)
+    if irrep_normalization == "none":
+        return 1.0
+    raise ValueError(f"unsupported irrep_normalization {irrep_normalization!r}")
+
+
+def _tensor_square_diagonal_alpha(ir: Irrep, ir_out: Irrep, irrep_normalization: str) -> float:
+    if irrep_normalization == "component":
+        if ir_out.l == 0:
+            return float(ir_out.dim / (ir.dim + 2))
+        return float(ir_out.dim / 2)
+    if irrep_normalization == "norm":
+        if ir_out.l == 0:
+            return float(ir_out.dim * ir.dim)
+        return float(ir.dim * (ir.dim + 2) / 2)
+    if irrep_normalization == "none":
+        return 1.0
+    raise ValueError(f"unsupported irrep_normalization {irrep_normalization!r}")
+
+
+class TensorSquare(TensorProduct):
+    def __init__(
+        self,
+        irreps_in: Irreps | str,
+        irreps_out: Irreps | str | None = None,
+        filter_ir_out: list[Irrep | str] | None = None,
+        *,
+        irrep_normalization: str = "component",
+        path_normalization: str = "element",
+        internal_weights: bool | None = None,
+        shared_weights: bool = True,
+        compile_left_right: bool = True,
+    ) -> None:
+        irreps_in = Irreps(irreps_in).simplify()
+        parsed_filter = None if filter_ir_out is None else [Irrep.parse(ir) for ir in filter_ir_out]
+        self._execution_irreps_out: Irreps | None = None
+        self._output_index_groups: tuple[tuple[int, ...], ...] | None = None
+        if irreps_out is None:
+            output, instructions = _tensor_square_full_instructions(irreps_in, parsed_filter, irrep_normalization)
+            super().__init__(
+                irreps_in,
+                irreps_in,
+                output,
+                instructions,
+                irrep_normalization="none",
+                path_normalization=path_normalization,
+                internal_weights=False,
+                shared_weights=True,
+                compile_left_right=compile_left_right,
+            )
+            self._execution_irreps_out = self.irreps_out
+            grouped_out, index_groups = _group_output_irreps(self._execution_irreps_out)
+            self.irreps_out = grouped_out
+            self._output_index_groups = index_groups
+            mx, _ = require_mlx()
+            grouped_mask = _regroup_output_array(
+                IrrepsArray(self._execution_irreps_out, self.output_mask[None, :]),
+                self.irreps_out,
+                self._output_index_groups,
+            )
+            self.output_mask = mx.maximum(grouped_mask.array[0], 0.0)
+        else:
+            if parsed_filter is not None:
+                raise ValueError("Both irreps_out and filter_ir_out were provided")
+            output = Irreps(irreps_out).simplify()
+            instructions = _tensor_square_fc_instructions(irreps_in, output, irrep_normalization)
+            super().__init__(
+                irreps_in,
+                irreps_in,
+                output,
+                instructions,
+                irrep_normalization="none",
+                path_normalization=path_normalization,
+                internal_weights=internal_weights,
+                shared_weights=shared_weights,
+                compile_left_right=compile_left_right,
+            )
+            self._execution_irreps_out = self.irreps_out
+        self.irreps_in = irreps_in
+
+    def __repr__(self) -> str:
+        path_count = sum(prod(ins.path_shape) for ins in self.instructions)
+        return (
+            f"TensorSquare({_explicit_mul_repr(self.irreps_in)} -> {_explicit_mul_repr(self.irreps_out)} | "
+            f"{path_count} paths | {self.weight_numel} weights)"
+        )
+
+    def _plan(self, weighted: bool) -> TensorProductPlan:
+        plan = super()._plan(weighted)
+        if self._execution_irreps_out is None:
+            return plan
+        return TensorProductPlan(
+            irreps_in1=plan.irreps_in1,
+            irreps_in2=plan.irreps_in2,
+            irreps_out=self._execution_irreps_out,
+            instructions=plan.instructions,
+            weighted=plan.weighted,
+            weight_numel=plan.weight_numel,
+            weighted_instruction_indices=plan.weighted_instruction_indices,
+            weight_slices=plan.weight_slices,
+        )
+
+    def __call__(self, array: IrrepsArray, weight: Any | None = None) -> IrrepsArray:
+        resolved_weight = self._get_weight(weight)
+        out = IrrepsArray(self._execution_irreps_out, self._compiled(array.array, array.array, resolved_weight))
+        if self._output_index_groups is None:
+            return out
+        return _regroup_output_array(out, self.irreps_out, self._output_index_groups)
