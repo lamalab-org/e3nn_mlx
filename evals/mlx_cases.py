@@ -221,6 +221,135 @@ def build_linear(config: dict[str, Any]) -> Task:
     )
 
 
+def _convolution_fixture(config):
+    mx, _, e3nn, _, Convolution, _ = _imports()
+    irreps_node = spherical_irreps(config["mul"], config["lmax"])
+    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
+    radial = config.get("radial", 10)
+    radial_hidden = config.get("radial_hidden", 64)
+    module = Convolution(
+        irreps_node,
+        "0e",
+        irreps_edge,
+        irreps_node,
+        [radial, radial_hidden],
+        float(config["neighbors"]),
+    )
+    return mx, e3nn, module, edge_src, edge_dst, edge_attr
+
+
+def build_weighted_tensor_product_uvu(config: dict[str, Any]) -> Task:
+    mx, e3nn, convolution, edge_src, _, edge_attr = _convolution_fixture(config)
+    module = convolution.tp
+    left = mx.random.normal(shape=(edge_src.shape[0], module.irreps_in1.dim))
+    right = edge_attr
+    weights = mx.random.normal(shape=(edge_src.shape[0], module.weight_numel))
+
+    def raw(first, second, weight):
+        return module(
+            e3nn.IrrepsArray(module.irreps_in1, first),
+            e3nn.IrrepsArray(module.irreps_in2, second),
+            weight,
+        ).array
+
+    value_grad = mx.value_and_grad(
+        lambda first, second, weight: mx.mean(raw(first, second, weight) ** 2),
+        argnums=(0, 1, 2),
+    )
+    arguments = left, right, weights
+    return _task(
+        name="weighted_tensor_product_uvu",
+        config=config,
+        item_count=edge_src.shape[0],
+        forward=lambda: raw(*arguments),
+        compile_forward=lambda: (
+            lambda compiled=mx.compile(raw): compiled(*arguments)
+        ),
+        train=lambda: value_grad(*arguments),
+        compile_train=lambda: (
+            lambda compiled=mx.compile(value_grad): compiled(*arguments)
+        ),
+    )
+
+
+def build_scatter_sum(config: dict[str, Any]) -> Task:
+    mx, e3nn, convolution, edge_src, edge_dst, _ = _convolution_fixture(config)
+    width = convolution.irreps_mid_execution.dim
+    source = mx.random.normal(shape=(edge_src.shape[0], width))
+
+    def raw(values):
+        return e3nn.scatter_sum(values, edge_dst, config["nodes"])
+
+    value_grad = mx.value_and_grad(lambda values: mx.mean(raw(values) ** 2))
+    return _task(
+        name="scatter_sum",
+        config=config,
+        item_count=edge_src.shape[0],
+        forward=lambda: raw(source),
+        compile_forward=lambda: (lambda compiled=mx.compile(raw): compiled(source)),
+        train=lambda: value_grad(source),
+        compile_train=lambda: (
+            lambda compiled=mx.compile(value_grad): compiled(source)
+        ),
+    )
+
+
+def build_gate(config: dict[str, Any]) -> Task:
+    mx, _, e3nn, _, _, _ = _imports()
+    from e3nn_mlx.nn_gate import Gate
+
+    scalars = f"{config['mul']}x0e"
+    gated = " + ".join(
+        f"{config['mul']}x{degree}{'e' if degree % 2 == 0 else 'o'}"
+        for degree in range(1, config["lmax"] + 1)
+    )
+    gates = f"{config['mul'] * config['lmax']}x0e"
+    module = Gate(
+        scalars,
+        [lambda value: value * mx.sigmoid(value)],
+        gates,
+        [mx.sigmoid],
+        gated,
+    )
+    values = mx.random.normal(shape=(config["items"], module.irreps_in.dim))
+
+    def raw(array):
+        return module(e3nn.IrrepsArray(module.irreps_in, array)).array
+
+    value_grad = mx.value_and_grad(lambda array: mx.mean(raw(array) ** 2))
+    return _task(
+        name="gate",
+        config=config,
+        item_count=config["items"],
+        forward=lambda: raw(values),
+        compile_forward=lambda: (lambda compiled=mx.compile(raw): compiled(values)),
+        train=lambda: value_grad(values),
+        compile_train=lambda: (
+            lambda compiled=mx.compile(value_grad): compiled(values)
+        ),
+    )
+
+
+def build_radial_mlp(config: dict[str, Any]) -> Task:
+    mx, _, convolution, edge_src, _, _ = _convolution_fixture(config)
+    module = convolution.fc
+    values = mx.random.normal(shape=(edge_src.shape[0], config["radial"]))
+    train, compile_train = _module_train_functions(
+        module, lambda array: mx.mean(module(array) ** 2), (values,)
+    )
+    return _task(
+        name="radial_mlp",
+        config=config,
+        item_count=edge_src.shape[0],
+        forward=lambda: module(values),
+        compile_forward=lambda: (
+            lambda compiled=mx.compile(module): compiled(values)
+        ),
+        train=train,
+        compile_train=compile_train,
+    )
+
+
 def build_v2106_convolution(config: dict[str, Any]) -> Task:
     mx, _, e3nn, _, Convolution, _ = _imports()
     irreps_node = spherical_irreps(config["mul"], config["lmax"])
@@ -355,6 +484,10 @@ BUILDERS = {
     "full_tensor_product": build_full_tensor_product,
     "fully_connected_tensor_product": build_fully_connected_tensor_product,
     "linear": build_linear,
+    "weighted_tensor_product_uvu": build_weighted_tensor_product_uvu,
+    "scatter_sum": build_scatter_sum,
+    "gate": build_gate,
+    "radial_mlp": build_radial_mlp,
     "v2106_convolution": build_v2106_convolution,
     "v2106_message_passing": build_v2106_message_passing,
     "v2106_network": build_v2106_network,

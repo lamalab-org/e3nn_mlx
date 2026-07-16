@@ -144,10 +144,31 @@ class Gate(mlx_module_base()):
                 return scalars
             gates = IrrepsArray(self.act_gates.irreps_in, gates.array)
             gates = self.act_gates(gates)
-            gated = IrrepsArray(self.mul.irreps_in1, gated.array)
-            gates = IrrepsArray(self.mul.irreps_in2, gates.array)
-            product = self.mul(gated, gates)
-            return IrrepsArray(self.irreps_out, mx.concatenate([scalars.array, product.array], axis=-1))
+            gated_outputs = []
+            gate_cursor = 0
+            for part, chunk in zip(
+                gated.irreps, gated.chunk_arrays(), strict=True
+            ):
+                gate_values = gates.array[
+                    ..., gate_cursor : gate_cursor + part.mul
+                ].reshape(*array.leading_shape, part.mul, 1)
+                gated_values = chunk.reshape(
+                    *array.leading_shape, part.mul, part.ir.dim
+                )
+                gated_outputs.append(
+                    (gate_values * gated_values).reshape(
+                        *array.leading_shape, part.dim
+                    )
+                )
+                gate_cursor += part.mul
+            product = (
+                mx.concatenate(gated_outputs, axis=-1)
+                if gated_outputs
+                else mx.zeros((*array.leading_shape, 0), dtype=array.dtype)
+            )
+            return IrrepsArray(
+                self.irreps_out, mx.concatenate([scalars.array, product], axis=-1)
+            )
 
         chunks = list(array.chunk_arrays())
         scalar_count = len(self.irreps_scalars)

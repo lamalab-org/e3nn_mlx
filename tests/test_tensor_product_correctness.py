@@ -236,6 +236,19 @@ def _reference_tensor_product(tp: TensorProduct, left: IrrepsArray, right: Irrep
     [
         ("uvw", "1o", "1o", "0e+1e+2e", [(0, 0, 0, "uvw", False), (0, 0, 1, "uvw", False), (0, 0, 2, "uvw", False)], None, True),
         ("uvu", "2x0e", "3x0e", "2x0e", [(0, 0, 0, "uvu", True)], [1.0, 0.5, -1.0, 2.0, 0.0, -0.5], True),
+        (
+            "uvu-grouped",
+            "2x1o",
+            "3x1o",
+            "2x0e + 2x1e + 2x2e",
+            [
+                (0, 0, 0, "uvu", True),
+                (0, 0, 1, "uvu", True),
+                (0, 0, 2, "uvu", True),
+            ],
+            [float(index - 8) / 7.0 for index in range(18)],
+            True,
+        ),
         ("uvv", "2x0e", "3x0e", "3x0e", [(0, 0, 0, "uvv", True)], [1.0, 0.0, -1.0, 0.5, 2.0, 0.0], True),
         ("uuw", "2x0e", "2x0e", "2x0e", [(0, 0, 0, "uuw", True)], [1.0, -1.0, 0.5, 2.0], True),
         ("uuu", "2x0e", "2x0e", "2x0e", [(0, 0, 0, "uuu", True)], [1.5, -0.25], True),

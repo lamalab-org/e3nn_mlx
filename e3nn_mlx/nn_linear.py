@@ -228,20 +228,80 @@ class Linear(mlx_module_base()):
             mx.zeros((*input_array.leading_shape, part.mul, part.ir.dim), dtype=array.dtype)
             for part in self.irreps_out
         ]
+        grouped_irreps = tuple(
+            dict.fromkeys(
+                self.irreps_out[instruction.output_index].ir
+                for instruction in self.instructions
+            )
+        )
+        for irrep in grouped_irreps:
+            dimension = irrep.dim
+            group = tuple(
+                instruction
+                for instruction in self.instructions
+                if self.irreps_out[instruction.output_index].ir == irrep
+            )
+            input_indices = tuple(dict.fromkeys(inst.input_index for inst in group))
+            output_indices = tuple(dict.fromkeys(inst.output_index for inst in group))
+            input_offsets = {}
+            output_offsets = {}
+            cursor = 0
+            for index in input_indices:
+                input_offsets[index] = cursor
+                cursor += self.irreps_in[index].mul
+            total_input = cursor
+            cursor = 0
+            for index in output_indices:
+                output_offsets[index] = cursor
+                cursor += self.irreps_out[index].mul
+            total_output = cursor
+            combined_input = mx.concatenate(
+                [
+                    input_chunks[index].reshape(
+                        *input_array.leading_shape,
+                        self.irreps_in[index].mul,
+                        dimension,
+                    )
+                    for index in input_indices
+                ],
+                axis=-2,
+            )
+            if len(group) == 1:
+                instruction = group[0]
+                matrix = weight[..., instruction.weight_slice].reshape(
+                    *weight.shape[:-1],
+                    instruction.in_mul,
+                    instruction.out_mul,
+                ).astype(array.dtype)
+                matrix = instruction.path_weight * matrix
+            else:
+                matrix = mx.zeros(
+                    (*weight.shape[:-1], total_input, total_output),
+                    dtype=array.dtype,
+                )
+                for instruction in group:
+                    input_start = input_offsets[instruction.input_index]
+                    output_start = output_offsets[instruction.output_index]
+                    block = weight[..., instruction.weight_slice].reshape(
+                        *weight.shape[:-1],
+                        instruction.in_mul,
+                        instruction.out_mul,
+                    ).astype(array.dtype)
+                    matrix = matrix.at[
+                        ...,
+                        input_start : input_start + instruction.in_mul,
+                        output_start : output_start + instruction.out_mul,
+                    ].add(instruction.path_weight * block)
+            transformed = mx.swapaxes(
+                mx.swapaxes(combined_input, -1, -2) @ matrix, -1, -2
+            )
+            for output_index in output_indices:
+                start = output_offsets[output_index]
+                stop = start + self.irreps_out[output_index].mul
+                outputs[output_index] = transformed[..., start:stop, :]
+
         bias_cursor = 0
         for output_index, out_part in enumerate(self.irreps_out):
-            for instruction in self.instructions:
-                if instruction.output_index != output_index:
-                    continue
-                chunk = input_chunks[instruction.input_index].reshape(
-                    *input_array.leading_shape, instruction.in_mul, instruction.dim
-                )
-                matrix = weight[..., instruction.weight_slice].reshape(
-                    *weight.shape[:-1], instruction.in_mul, instruction.out_mul
-                ).astype(array.dtype)
-                outputs[output_index] = outputs[output_index] + instruction.path_weight * mx.einsum(
-                    "...io,...id->...od", matrix, chunk
-                )
             if bias is not None and output_index in self._bias_output_indices:
                 width = out_part.mul
                 bias_shape = (*((1,) * len(input_array.leading_shape)), width, 1)

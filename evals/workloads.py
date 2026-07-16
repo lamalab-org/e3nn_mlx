@@ -23,6 +23,22 @@ CASE_DESCRIPTIONS = {
         "Blockwise equivariant Linear layer; measures multiplicity mixing without geometric "
         "coupling and is often bandwidth or launch-overhead limited."
     ),
+    "weighted_tensor_product_uvu": (
+        "Per-edge unshared weighted uvu tensor product used by v2106 convolution; isolates "
+        "Clebsch-Gordan coupling and learned path reduction before graph aggregation."
+    ),
+    "scatter_sum": (
+        "Destination-indexed sum of dense edge messages into nodes; isolates sparse graph "
+        "aggregation from equivariant message construction."
+    ),
+    "gate": (
+        "Parity-aware scalar activation and gating of non-scalar irreps; isolates the "
+        "nonlinearity between message-passing layers."
+    ),
+    "radial_mlp": (
+        "Radial fully connected network producing per-edge tensor-product weights; isolates "
+        "dense radial conditioning from equivariant contractions."
+    ),
     "v2106_convolution": (
         "One modular v2106 convolution on a fixed sparse graph, including radial MLP, tensor "
         "product, scatter aggregation, residual path, and learned alpha mixing."
@@ -48,6 +64,13 @@ PRESETS: dict[str, dict[str, dict[str, Any]]] = {
             "lmax": 2,
         },
         "linear": {"items": 512, "mul": 8, "lmax": 3},
+        "weighted_tensor_product_uvu": {"nodes": 64, "neighbors": 4, "mul": 4, "lmax": 2},
+        "scatter_sum": {"nodes": 64, "neighbors": 4, "mul": 4, "lmax": 2},
+        "gate": {"items": 256, "mul": 4, "lmax": 2},
+        "radial_mlp": {
+            "nodes": 64, "neighbors": 4, "mul": 4, "lmax": 2,
+            "radial": 10, "radial_hidden": 16,
+        },
         "v2106_convolution": {
             "nodes": 64,
             "neighbors": 4,
@@ -82,6 +105,15 @@ PRESETS: dict[str, dict[str, dict[str, Any]]] = {
             "lmax": 3,
         },
         "linear": {"items": 16_384, "mul": 32, "lmax": 4},
+        "weighted_tensor_product_uvu": {
+            "nodes": 2_048, "neighbors": 16, "mul": 24, "lmax": 3,
+        },
+        "scatter_sum": {"nodes": 2_048, "neighbors": 16, "mul": 24, "lmax": 3},
+        "gate": {"items": 32_768, "mul": 24, "lmax": 3},
+        "radial_mlp": {
+            "nodes": 2_048, "neighbors": 16, "mul": 24, "lmax": 3,
+            "radial": 10, "radial_hidden": 64,
+        },
         "v2106_convolution": {
             "nodes": 2_048,
             "neighbors": 16,
@@ -116,6 +148,15 @@ PRESETS: dict[str, dict[str, dict[str, Any]]] = {
             "lmax": 4,
         },
         "linear": {"items": 131_072, "mul": 64, "lmax": 5},
+        "weighted_tensor_product_uvu": {
+            "nodes": 8_192, "neighbors": 24, "mul": 32, "lmax": 4,
+        },
+        "scatter_sum": {"nodes": 8_192, "neighbors": 24, "mul": 32, "lmax": 4},
+        "gate": {"items": 196_608, "mul": 32, "lmax": 4},
+        "radial_mlp": {
+            "nodes": 8_192, "neighbors": 24, "mul": 32, "lmax": 4,
+            "radial": 10, "radial_hidden": 128,
+        },
         "v2106_convolution": {
             "nodes": 8_192,
             "neighbors": 24,

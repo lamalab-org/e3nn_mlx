@@ -30,7 +30,11 @@ non-identifying hardware information are retained in JSON.
 | `spherical_harmonics` | All degrees from `0` through `lmax`, component normalization | Executed for every geometric edge; many small polynomial kernels can be launch-bound. |
 | `full_tensor_product` | Unweighted `FullTensorProduct` of the same input irreps | Materializes all representation-product channels and strongly stresses Clebsch--Gordan contractions. |
 | `fully_connected_tensor_product` | Learned `FullyConnectedTensorProduct` with identical input/output irreps | Models the dense equivariant mixing used by learned interactions. |
+| `weighted_tensor_product_uvu` | The learned, edge-wise `uvu` contraction used inside v2106 convolution | Isolates the dominant generated-message contraction from its radial MLP and graph reduction. |
 | `linear` | Blockwise equivariant `Linear` with the same irreps | Isolates multiplicity mixing from geometry and sparse aggregation. |
+| `scatter_sum` | Sum fixed edge messages into destination nodes | Measures graph-reduction cost separately from equivariant arithmetic. |
+| `gate` | Activated scalar gates multiplying non-scalar irrep blocks | Exposes temporary tensors and launch overhead in a common nonlinear layer. |
+| `radial_mlp` | The scalar MLP which generates tensor-product path weights | Separates ordinary dense-network cost from the equivariant contraction it drives. |
 | `v2106_convolution` | Radial MLP, tensor product, scatter, self connection, and learned alpha on a fixed graph | The core sparse interaction in the modular v2106 models. |
 | `v2106_message_passing` | A gated stack of v2106 convolutions | Exposes fusion and launch overhead across repeated interactions. |
 | `v2106_network` | Position geometry, radial basis, spherical harmonics, attributed message passing, and graph pooling | The closest end-to-end comparison of actual model execution. |
@@ -143,7 +147,8 @@ Recommended large experiment:
 # Reboot or close GPU-heavy applications, connect power, and run each case
 # separately so allocator peaks and thermal behavior are attributable.
 for case in spherical_harmonics linear full_tensor_product \
-            fully_connected_tensor_product v2106_convolution \
+            fully_connected_tensor_product weighted_tensor_product_uvu \
+            scatter_sum gate radial_mlp v2106_convolution \
             v2106_message_passing v2106_network; do
   python3 evals/run.py --backend both --preset large \
     --case "$case" --warmup 8 --samples 30
@@ -236,6 +241,13 @@ The most valuable outcome may be a mixed profile rather than one headline
 number: for example, fast compiled spherical harmonics and gating but a tensor
 product bottleneck. That directly identifies which MLX kernels deserve custom
 optimization.
+
+The isolated `weighted_tensor_product_uvu`, `scatter_sum`, `gate`, and
+`radial_mlp` cases are also intended as before/after checks for optimized model
+internals. In particular, a contraction-plus-aggregation implementation should
+only replace MLX's indexed-add reduction if it improves the complete
+`v2106_convolution` result; a faster-looking microkernel is not sufficient if
+extra launches or atomic contention make the model slower.
 
 ## Outputs and plots
 

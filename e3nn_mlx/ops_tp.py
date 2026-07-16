@@ -124,7 +124,28 @@ def _couple_blocks(inst: TensorProductInstruction, left: Any, right: Any) -> Any
     mx, _ = require_mlx()
     if inst.ir_in1.p * inst.ir_in2.p != inst.ir_out.p:
         raise ValueError(f"parity mismatch in tensor product instruction {inst}")
-    cg = mx.array(_cg_array_data(inst.ir_in1, inst.ir_in2, inst.ir_out), dtype=left.dtype)
+    data = _cg_array_data(inst.ir_in1, inst.ir_in2, inst.ir_out)
+    if (
+        inst.mode != "uvw"
+        and inst.ir_in1.dim == 1
+        and inst.ir_out.dim == inst.ir_in2.dim
+    ):
+        diagonal = mx.array(
+            tuple(data[0][index][index] for index in range(inst.ir_in2.dim)),
+            dtype=left.dtype,
+        )
+        return left[..., :, None, 0, None] * right[..., None, :, :] * diagonal
+    if (
+        inst.mode != "uvw"
+        and inst.ir_in2.dim == 1
+        and inst.ir_out.dim == inst.ir_in1.dim
+    ):
+        diagonal = mx.array(
+            tuple(data[index][0][index] for index in range(inst.ir_in1.dim)),
+            dtype=left.dtype,
+        )
+        return left[..., :, None, :] * right[..., None, :, 0, None] * diagonal
+    cg = mx.array(data, dtype=left.dtype)
     return mx.einsum("...ua,...vb,abc->...uvc", left, right, cg).astype(left.dtype)
 
 
@@ -208,6 +229,124 @@ def _group_instruction_indices(plan: TensorProductPlan) -> dict[int, list[int]]:
     return groups
 
 
+def _couple_instruction_group(
+    instructions: tuple[TensorProductInstruction, ...], left: Any, right: Any
+) -> Any:
+    """Couple one input-block pair to several output irreps in one transform."""
+    mx, _ = require_mlx()
+    specifications = tuple(
+        (
+            instruction.ir_in1,
+            instruction.ir_in2,
+            instruction.ir_out,
+            instruction.normalization.scale(),
+        )
+        for instruction in instructions
+    )
+    data = _combined_cg_array_data(specifications)
+    dim1 = instructions[0].ir_in1.dim
+    dim2 = instructions[0].ir_in2.dim
+    output_dim = sum(instruction.ir_out.dim for instruction in instructions)
+
+    # Coupling to or from a scalar is a diagonal scaling in the canonical basis.
+    if dim1 == 1 and output_dim == dim2:
+        diagonal = mx.array(
+            tuple(data[0][index][index] for index in range(dim2)),
+            dtype=left.dtype,
+        )
+        return (
+            left[..., :, None, 0, None]
+            * right[..., None, :, :]
+            * diagonal
+        )
+    if dim2 == 1 and output_dim == dim1:
+        diagonal = mx.array(
+            tuple(data[index][0][index] for index in range(dim1)),
+            dtype=left.dtype,
+        )
+        return (
+            left[..., :, None, :]
+            * right[..., None, :, 0, None]
+            * diagonal
+        )
+
+    coefficients = mx.array(data, dtype=left.dtype).reshape(
+        dim1 * dim2, output_dim
+    )
+    outer = (
+        left[..., :, None, :, None] * right[..., None, :, None, :]
+    ).reshape(*left.shape[:-2], left.shape[-2], right.shape[-2], dim1 * dim2)
+    return outer @ coefficients
+
+
+def _grouped_weighted_tensor_product(
+    plan: TensorProductPlan,
+    left_chunks: tuple[Any, ...],
+    right_chunks: tuple[Any, ...],
+    weights: Any,
+    leading_shape: tuple[int, ...],
+    weighted_lookup: dict[int, slice],
+    dtype: Any,
+) -> IrrepsArray:
+    """Execute compatible weighted paths without repeated coupling tensors."""
+    mx, _ = require_mlx()
+    groups: dict[
+        tuple[int, int, str], list[tuple[int, TensorProductInstruction]]
+    ] = {}
+    for index, instruction in enumerate(plan.instructions):
+        groups.setdefault(
+            (
+                instruction.input1_index,
+                instruction.input2_index,
+                instruction.mode,
+            ),
+            [],
+        ).append((index, instruction))
+
+    output_blocks = [
+        mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=dtype)
+        for part in plan.irreps_out
+    ]
+    for (input1, input2, mode), indexed_instructions in groups.items():
+        instructions = tuple(instruction for _, instruction in indexed_instructions)
+        part1 = plan.irreps_in1[input1]
+        part2 = plan.irreps_in2[input2]
+        block1 = _reshape_chunk(left_chunks[input1], part1.mul, part1.ir.dim)
+        block2 = _reshape_chunk(right_chunks[input2], part2.mul, part2.ir.dim)
+        coupled = _couple_instruction_group(instructions, block1, block2)
+        start = 0
+        for instruction_index, instruction in indexed_instructions:
+            stop = start + instruction.ir_out.dim
+            weight_slice = weighted_lookup[instruction_index]
+            weight = weights[..., weight_slice].reshape(
+                *weights.shape[:-1], *instruction.path_shape
+            ).astype(dtype)
+            selected = coupled[..., start:stop]
+            if mode == "uvu":
+                contribution = mx.sum(selected * weight[..., None], axis=-2)
+            elif mode == "uvv":
+                contribution = mx.sum(selected * weight[..., None], axis=-3)
+            else:  # guarded by the caller
+                raise ValueError(f"unsupported grouped weighted mode {mode!r}")
+            output_blocks[instruction.output_index] = (
+                output_blocks[instruction.output_index] + contribution
+            )
+            start = stop
+
+    if not output_blocks:
+        return IrrepsArray(
+            plan.irreps_out, mx.zeros((*leading_shape, 0), dtype=dtype)
+        )
+    array = mx.concatenate(
+        [
+            block.reshape(*leading_shape, part.dim)
+            for block, part in zip(output_blocks, plan.irreps_out, strict=True)
+        ],
+        axis=-1,
+    )
+    return IrrepsArray(plan.irreps_out, array)
+
+
 def _output_block_cursors(plan: TensorProductPlan) -> list[int]:
     return [0 for _ in plan.irreps_out]
 
@@ -249,9 +388,29 @@ def _numerical_tensor_product(
 
     left_chunks = left.chunk_arrays()
     right_chunks = right.chunk_arrays()
+    weighted_lookup = {
+        instruction_index: weight_slice
+        for instruction_index, weight_slice in zip(
+            plan.weighted_instruction_indices, plan.weight_slices, strict=True
+        )
+    }
+    if weights is not None and plan.instructions and all(
+        instruction.mode in ("uvu", "uvv")
+        and instruction.has_weight
+        and index in weighted_lookup
+        for index, instruction in enumerate(plan.instructions)
+    ):
+        return _grouped_weighted_tensor_product(
+            plan,
+            left_chunks,
+            right_chunks,
+            weights,
+            leading_shape,
+            weighted_lookup,
+            left.array.dtype,
+        )
     output_blocks = [mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype) for part in plan.irreps_out]
     grouped_outputs: list[list[Any]] = [[] for _ in plan.irreps_out]
-    weighted_lookup = {instruction_index: weight_slice for instruction_index, weight_slice in zip(plan.weighted_instruction_indices, plan.weight_slices, strict=True)}
     for instruction_index, inst in enumerate(plan.instructions):
         left_mul = plan.irreps_in1[inst.input1_index].mul
         right_mul = plan.irreps_in2[inst.input2_index].mul

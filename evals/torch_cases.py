@@ -213,6 +213,129 @@ def build_linear(config: dict[str, Any]) -> Task:
     )
 
 
+def _convolution_fixture(config):
+    torch, o3, Convolution, _, _ = _imports()
+    irreps_node = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
+    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
+    radial = config.get("radial", 10)
+    radial_hidden = config.get("radial_hidden", 64)
+    module = Convolution(
+        irreps_node,
+        "0e",
+        irreps_edge,
+        irreps_node,
+        [radial, radial_hidden],
+        float(config["neighbors"]),
+    ).to(_DEVICE)
+    return torch, o3, module, edge_src, edge_dst, edge_attr
+
+
+def build_weighted_tensor_product_uvu(config: dict[str, Any]) -> Task:
+    torch, _, convolution, edge_src, _, edge_attr = _convolution_fixture(config)
+    module = convolution.tp
+    left = torch.randn(
+        edge_src.shape[0], module.irreps_in1.dim, device=_DEVICE, requires_grad=True
+    )
+    right = edge_attr.detach().requires_grad_(True)
+    weights = torch.randn(
+        edge_src.shape[0], module.weight_numel, device=_DEVICE, requires_grad=True
+    )
+
+    def raw():
+        return module(left, right, weights)
+
+    def train():
+        for value in (left, right, weights):
+            value.grad = None
+        loss = raw().square().mean()
+        loss.backward()
+        return loss
+
+    return _task(
+        name="weighted_tensor_product_uvu",
+        config=config,
+        item_count=edge_src.shape[0],
+        forward=raw,
+        train=train,
+    )
+
+
+def build_scatter_sum(config: dict[str, Any]) -> Task:
+    torch, _, convolution, edge_src, edge_dst, _ = _convolution_fixture(config)
+    source = torch.randn(
+        edge_src.shape[0],
+        convolution.tp.irreps_out.dim,
+        device=_DEVICE,
+        requires_grad=True,
+    )
+
+    def raw():
+        output = torch.zeros(
+            config["nodes"], source.shape[1], device=_DEVICE, dtype=source.dtype
+        )
+        return output.index_add(0, edge_dst, source)
+
+    def train():
+        source.grad = None
+        loss = raw().square().mean()
+        loss.backward()
+        return loss
+
+    return _task(
+        name="scatter_sum",
+        config=config,
+        item_count=edge_src.shape[0],
+        forward=raw,
+        train=train,
+    )
+
+
+def build_gate(config: dict[str, Any]) -> Task:
+    torch, o3, _, _, _ = _imports()
+    from e3nn.nn import Gate
+
+    scalars = o3.Irreps(f"{config['mul']}x0e")
+    gated = o3.Irreps(
+        " + ".join(
+            f"{config['mul']}x{degree}{'e' if degree % 2 == 0 else 'o'}"
+            for degree in range(1, config["lmax"] + 1)
+        )
+    )
+    gates = o3.Irreps(f"{config['mul'] * config['lmax']}x0e")
+    module = Gate(
+        scalars,
+        [torch.nn.functional.silu],
+        gates,
+        [torch.sigmoid],
+        gated,
+    ).to(_DEVICE)
+    values = torch.randn(
+        config["items"], module.irreps_in.dim, device=_DEVICE, requires_grad=True
+    )
+    raw = lambda: module(values)
+    return _task(
+        name="gate",
+        config=config,
+        item_count=config["items"],
+        forward=raw,
+        train=_module_train(module, raw),
+    )
+
+
+def build_radial_mlp(config: dict[str, Any]) -> Task:
+    torch, _, convolution, edge_src, _, _ = _convolution_fixture(config)
+    module = convolution.fc
+    values = torch.randn(edge_src.shape[0], config["radial"], device=_DEVICE)
+    raw = lambda: module(values)
+    return _task(
+        name="radial_mlp",
+        config=config,
+        item_count=edge_src.shape[0],
+        forward=raw,
+        train=_module_train(module, raw),
+    )
+
+
 def build_v2106_convolution(config: dict[str, Any]) -> Task:
     torch, o3, Convolution, _, _ = _imports()
     irreps_node = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
@@ -314,6 +437,10 @@ BUILDERS = {
     "full_tensor_product": build_full_tensor_product,
     "fully_connected_tensor_product": build_fully_connected_tensor_product,
     "linear": build_linear,
+    "weighted_tensor_product_uvu": build_weighted_tensor_product_uvu,
+    "scatter_sum": build_scatter_sum,
+    "gate": build_gate,
+    "radial_mlp": build_radial_mlp,
     "v2106_convolution": build_v2106_convolution,
     "v2106_message_passing": build_v2106_message_passing,
     "v2106_network": build_v2106_network,
