@@ -57,6 +57,10 @@ from .ops_sh import (
 from .ops_reduce_tensor import ReducedTensorProducts
 from .ops_s2 import FromS2Grid, ToS2Grid, s2_grid
 from .ops_so3 import SO3Grid, so3_irreps
+from .graph import radius_graph, scatter_sum
+from .radial import smooth_cutoff, soft_one_hot_linspace, soft_unit_step
+from .models.gate_points_2102 import Convolution as GatePointsConvolution
+from .models.gate_points_2102 import Network as GatePointsNetwork
 from .ops_tp import (
     ElementwiseTensorProduct,
     FullTensorProduct,
@@ -79,6 +83,8 @@ __all__ = [
     "FullyConnectedNet",
     "FromS2Grid",
     "Gate",
+    "GatePointsConvolution",
+    "GatePointsNetwork",
     "Identity",
     "Irrep",
     "Irreps",
@@ -118,7 +124,12 @@ __all__ = [
     "matrix_z",
     "mlx_backend",
     "rotation_matrix",
+    "radius_graph",
     "s2_grid",
+    "scatter_sum",
+    "smooth_cutoff",
+    "soft_one_hot_linspace",
+    "soft_unit_step",
     "so3_irreps",
     "quaternion_to_angles",
     "quaternion_to_axis_angle",

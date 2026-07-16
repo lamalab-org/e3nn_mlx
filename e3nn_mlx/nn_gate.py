@@ -89,11 +89,13 @@ class Gate(mlx_module_base()):
         self.odd_gate_activation = odd_gate_activation
 
         if self._upstream_api:
+            activation_irreps_scalars = self.irreps_scalars
+            activation_irreps_gates = self.irreps_gates
             self.sc = _Sortcut(self.irreps_scalars, self.irreps_gates, self.irreps_gated)
             self.irreps_scalars, self.irreps_gates, self.irreps_gated = self.sc.irreps_outs
             self.irreps_in = self.sc.irreps_in
-            self.act_scalars = Activation(self.irreps_scalars, act_scalars)
-            self.act_gates = Activation(self.irreps_gates, act_gates)
+            self.act_scalars = Activation(activation_irreps_scalars, act_scalars)
+            self.act_gates = Activation(activation_irreps_gates, act_gates)
             self.mul = ElementwiseTensorProduct(
                 self.irreps_gated,
                 self.act_gates.irreps_out,
@@ -136,9 +138,11 @@ class Gate(mlx_module_base()):
             raise ValueError("input irreps do not match Gate.irreps_in")
         if self._upstream_api:
             scalars, gates, gated = self.sc(array)
+            scalars = IrrepsArray(self.act_scalars.irreps_in, scalars.array)
             scalars = self.act_scalars(scalars)
             if not self.irreps_gates:
                 return scalars
+            gates = IrrepsArray(self.act_gates.irreps_in, gates.array)
             gates = self.act_gates(gates)
             gated = IrrepsArray(self.mul.irreps_in1, gated.array)
             gates = IrrepsArray(self.mul.irreps_in2, gates.array)

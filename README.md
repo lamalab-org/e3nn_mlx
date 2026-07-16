@@ -10,6 +10,7 @@ The P0 implementation currently provides:
 - spherical harmonics generated recursively from the canonical Wigner basis
 - weighted and unweighted MLX tensor products and standard wrappers
 - lightweight MLX Linear, Gate, Norm, and reduction operations
+- graph/radial utilities and the gated `gate_points_2102` point-cloud network
 - pinned upstream e3nn numerical fixtures and Apple-Silicon CI coverage
 
 P0 guarantees numerical compatibility through `l=6`; reference and structural
@@ -28,3 +29,16 @@ python -m pytest
 
 MLX tests may skip when Metal is unavailable locally.  The required macOS CI job
 sets `E3NN_MLX_REQUIRE_RUNTIME=1`, which turns such skips into failures.
+
+## Gate-points model
+
+`e3nn_mlx.models.gate_points_2102.Network` ports the upstream gated point-cloud
+network. It accepts a dictionary containing `pos`, `x`, `z`, and an optional
+integer `batch` array and returns an `IrrepsArray`. `GatePointsNetwork` and
+`GatePointsConvolution` are also exported from `e3nn_mlx`.
+
+Neighbor discovery with `radius_graph` is eager because MLX 0.31 does not have
+a device-side dynamic nonzero operation. For compiled training or inference,
+construct the topology once and call `Network.forward_with_edges`; the radial
+embedding, spherical harmonics, message passing, gating, and graph reduction
+then remain inside the compiled MLX graph.
