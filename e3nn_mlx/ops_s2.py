@@ -147,16 +147,24 @@ class FromS2Grid(mlx_module_base()):
     def __init__(self, res=None, lmax=None, normalization: str = "component", lmax_in=None) -> None:
         super().__init__()
         self.lmax, self.res_beta, self.res_alpha = _resolve(lmax, res)
-        if lmax_in is not None and lmax_in < self.lmax:
-            raise ValueError("lmax_in must be at least lmax")
+        if lmax_in is None:
+            lmax_in = self.lmax
+        if lmax_in < 0:
+            raise ValueError("lmax_in must be non-negative")
         _, analysis, betas, alphas, grid = _transform_data(
             self.lmax, self.res_beta, self.res_alpha, normalization
         )
+        # ``component`` and ``norm`` synthesis both scale all degrees by
+        # ``1 / sqrt(lmax_in + 1)``.  Projection must undo the normalization
+        # of the signal's input bandwidth, which need not equal lmax_out.
+        if normalization in ("component", "norm"):
+            analysis = analysis * sqrt((int(lmax_in) + 1) / (self.lmax + 1))
         mx, _ = require_mlx()
         self._analysis = mx.array(analysis)
         self._betas = mx.array(betas)
         self._alphas = mx.array(alphas)
         self._grid = mx.array(grid)
+        self.lmax_in = int(lmax_in)
         self.irreps_out = Irreps.spherical_harmonics(self.lmax)
 
     @property

@@ -12,6 +12,7 @@ from .nn_extract import Extract, ExtractIr
 from .nn_batchnorm import BatchNorm
 from .nn_fc import FullyConnectedNet
 from .nn_normact import NormActivation
+from .nn_s2act import S2Activation
 from .nn_linear import Linear
 from .nn_norm import Norm
 from .ops_rotations import (
@@ -85,6 +86,7 @@ __all__ = [
     "MulIrrep",
     "Norm",
     "NormActivation",
+    "S2Activation",
     "ReducedTensorProducts",
     "SphericalHarmonics",
     "SphericalHarmonicsAlphaBeta",
