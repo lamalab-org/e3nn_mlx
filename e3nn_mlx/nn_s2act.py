@@ -42,7 +42,18 @@ class S2Activation(mlx_module_base()):
         else:
             raise ValueError("the parity of the input spherical signal is not well defined")
 
-        scale, activation_parity = _activation_properties(act)
+        scale, _ = _activation_properties(act)
+        mx, _ = require_mlx()
+        probe = mx.linspace(0.0, 10.0, 256)
+        positive, negative = act(probe), act(-probe)
+        magnitude = float(mx.max(mx.abs(positive)))
+        even_error = float(mx.max(mx.abs(positive - negative)))
+        odd_error = float(mx.max(mx.abs(positive + negative)))
+        activation_parity = (
+            1
+            if even_error < magnitude * 1e-10
+            else (-1 if odd_error < magnitude * 1e-10 else 0)
+        )
         if lmax_out is None:
             lmax_out = lmax
         if lmax_out < 0:

@@ -5,8 +5,6 @@ from __future__ import annotations
 from functools import lru_cache
 from math import pi, sqrt
 
-import numpy as np
-
 from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 from e3nn_core.wigner import so3_generators
 
@@ -22,8 +20,10 @@ def so3_irreps(lmax: int) -> Irreps:
     return Irreps([MulIrrep(2 * l + 1, Irrep(l, 1)) for l in range(lmax + 1)])
 
 
-def _matrix_exp_generator(generator: np.ndarray, angles: np.ndarray) -> np.ndarray:
+def _matrix_exp_generator(generator, angles):
     """Evaluate the same fixed-work exponential used by the MLX Wigner code."""
+
+    import numpy as np
 
     scaled = np.remainder(angles, 2.0 * pi)[..., None, None] * generator / 64.0
     result = np.broadcast_to(np.eye(generator.shape[-1]), scaled.shape).copy() + scaled
@@ -38,6 +38,8 @@ def _matrix_exp_generator(generator: np.ndarray, angles: np.ndarray) -> np.ndarr
 
 @lru_cache(maxsize=None)
 def _so3_grid_data(lmax: int, resolution: int, aspect_ratio: int):
+    import numpy as np
+
     if resolution <= 0:
         raise ValueError("resolution must be positive")
     if aspect_ratio <= 0:

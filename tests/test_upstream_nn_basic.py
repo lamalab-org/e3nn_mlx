@@ -52,11 +52,12 @@ def test_upstream_activation_parity_compile_equivariance_and_normalization(irrep
         assert _max_abs(mx.where(finite, selected - reference, mx.zeros_like(selected))) < 2e-5
 
     angles = e3nn.rand_angles()
-    d_in = e3nn.irreps_wigner_d(module.irreps_in, *angles)
-    d_out = e3nn.irreps_wigner_d(module.irreps_out, *angles)
-    rotated = module(_array(module.irreps_in, values[:8] @ mx.swapaxes(d_in, -1, -2))).array
-    expected_rotated = output.array[:8] @ mx.swapaxes(d_out, -1, -2)
-    assert _max_abs(rotated - expected_rotated) < 3e-5
+    for inversion in (0, 1):
+        d_in = e3nn.irreps_wigner_d(module.irreps_in, *angles, k=inversion)
+        d_out = e3nn.irreps_wigner_d(module.irreps_out, *angles, k=inversion)
+        rotated = module(_array(module.irreps_in, values[:8] @ mx.swapaxes(d_in, -1, -2))).array
+        expected_rotated = output.array[:8] @ mx.swapaxes(d_out, -1, -2)
+        assert _max_abs(rotated - expected_rotated) < 3e-5
     compiled = mx.compile(lambda raw: module(_array(module.irreps_in, raw)).array)
     assert _max_abs(compiled(values[:8]) - output.array[:8]) < 2e-6
     assert module.parameters() == {}
@@ -94,13 +95,17 @@ def test_upstream_equivariant_dropout_training_eval_compile_and_copy() -> None:
             assert bool(mx.all(zero_pattern == zero_pattern[..., :1]))
 
     angles = e3nn.rand_angles()
-    representation = e3nn.irreps_wigner_d(module.irreps, *angles)
-    rotated_values = values @ mx.swapaxes(representation, -1, -2)
-    mx.random.seed(123)
-    actual = module(_array(module.irreps, rotated_values)).array
-    mx.random.seed(123)
-    expected = module(features).array @ mx.swapaxes(representation, -1, -2)
-    assert _max_abs(actual - expected) < 3e-5
+    for inversion in (0, 1):
+        representation = e3nn.irreps_wigner_d(module.irreps, *angles, k=inversion)
+        rotated_values = values @ mx.swapaxes(representation, -1, -2)
+        mx.random.seed(123)
+        actual = module(_array(module.irreps, rotated_values)).array
+        mx.random.seed(123)
+        expected = module(features).array @ mx.swapaxes(representation, -1, -2)
+        assert _max_abs(actual - expected) < 3e-5
+    compiled = mx.compile(lambda raw: module(_array(module.irreps, raw)).array)
+    compiled_output = compiled(values)
+    assert bool(mx.all((compiled_output == values / 0.25) | (compiled_output == 0)))
     assert isinstance(copy.deepcopy(module), e3nn.Dropout)
 
 
@@ -126,6 +131,12 @@ def test_upstream_extract_multiple_single_ir_and_compile_copy() -> None:
     assert first.array.tolist() == [1.0]
     assert second.array.tolist() == [2.0]
     assert multiple.irreps_outs == (e3nn.Irreps("0e"), e3nn.Irreps("0e"))
+    compiled_multiple = mx.compile(
+        lambda raw: tuple(output.array for output in multiple(_array(multiple.irreps_in, raw)))
+    )
+    compiled_first, compiled_second = compiled_multiple(values)
+    assert compiled_first.tolist() == [1.0]
+    assert compiled_second.tolist() == [2.0]
 
     for squeeze in (True, False):
         single = e3nn.Extract("1e + 0e + 0e", ["0e"], [(1,)], squeeze_out=squeeze)
@@ -144,6 +155,18 @@ def test_upstream_extract_multiple_single_ir_and_compile_copy() -> None:
     selected = extract_ir(features)
     assert selected.irreps == e3nn.Irreps("0e + 0e")
     assert selected.array.tolist() == [1.0, 2.0]
+    angles = e3nn.rand_angles()
+    for module in (multiple, extract_ir):
+        for inversion in (0, 1):
+            d_in = e3nn.irreps_wigner_d(module.irreps_in, *angles, k=inversion)
+            transformed = _array(module.irreps_in, values @ mx.swapaxes(d_in, -1, -2))
+            actual_outputs = module(transformed)
+            actual_outputs = actual_outputs if isinstance(actual_outputs, tuple) else (actual_outputs,)
+            base_outputs = module(features)
+            base_outputs = base_outputs if isinstance(base_outputs, tuple) else (base_outputs,)
+            for actual, base in zip(actual_outputs, base_outputs, strict=True):
+                d_out = e3nn.irreps_wigner_d(actual.irreps, *angles, k=inversion)
+                assert _max_abs(actual.array - base.array @ mx.swapaxes(d_out, -1, -2)) < 2e-6
     assert isinstance(copy.deepcopy(multiple), e3nn.Extract)
     assert isinstance(copy.deepcopy(extract_ir), e3nn.ExtractIr)
 

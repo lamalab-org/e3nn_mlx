@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import functools
+import importlib.util
 import os
 import subprocess
 import sys
-import functools
 
 
 class _UnavailableMLXModule:
@@ -17,6 +18,10 @@ class _UnavailableMLXModule:
 
 @functools.lru_cache(maxsize=1)
 def mlx_runtime_available() -> bool:
+    # The runtime probe must not discover packages that are absent from this
+    # interpreter (for example when it was started with ``python -S``).
+    if importlib.util.find_spec("mlx") is None:
+        return False
     env = dict(os.environ)
     probe = [sys.executable, "-c", "import mlx.core as mx; print(int(mx.is_available(mx.cpu)))"]
     result = subprocess.run(probe, capture_output=True, text=True, env=env, check=False)

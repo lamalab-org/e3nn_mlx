@@ -22,11 +22,12 @@ def _max_abs(value) -> float:
 def _assert_module_equivariant(module, values, tolerance=3e-4) -> None:
     mx = mlx_backend._require()
     angles = e3nn.rand_angles()
-    d_in = e3nn.irreps_wigner_d(module.irreps_in, *angles)
-    d_out = e3nn.irreps_wigner_d(module.irreps_out, *angles)
-    actual = module(_array(module.irreps_in, values @ mx.swapaxes(d_in, -1, -2))).array
-    expected = module(_array(module.irreps_in, values)).array @ mx.swapaxes(d_out, -1, -2)
-    assert _max_abs(actual - expected) < tolerance
+    for inversion in (0, 1):
+        d_in = e3nn.irreps_wigner_d(module.irreps_in, *angles, k=inversion)
+        d_out = e3nn.irreps_wigner_d(module.irreps_out, *angles, k=inversion)
+        actual = module(_array(module.irreps_in, values @ mx.swapaxes(d_in, -1, -2))).array
+        expected = module(_array(module.irreps_in, values)).array @ mx.swapaxes(d_out, -1, -2)
+        assert _max_abs(actual - expected) < tolerance
 
 
 @pytest.mark.mlx
@@ -120,6 +121,11 @@ def test_upstream_norm_activation_values_directions_and_zero_grad(do_bias: bool,
     nonzero = input_norm > 1e-7
     assert _max_abs(mx.where(nonzero, output_norm - expected_norm, mx.zeros_like(output_norm))) < 3e-5
     assert _max_abs(mx.where(nonzero, mx.zeros_like(output_norm), output_norm)) == 0.0
+    safe_input = vector_input / mx.maximum(input_norm[..., None], 1e-8)
+    safe_output = vector_output / mx.maximum(output_norm[..., None], 1e-8)
+    alignment = mx.abs(mx.sum(safe_input * safe_output, axis=-1))
+    has_direction = nonzero & (output_norm > 1e-7)
+    assert _max_abs(mx.where(has_direction, alignment - 1.0, mx.zeros_like(alignment))) < 3e-5
 
     zero = mx.zeros((irreps.dim,))
     gradient = mx.grad(lambda raw: mx.sum(module(_array(irreps, raw)).array))(zero)
@@ -154,14 +160,14 @@ def test_upstream_fully_connected_net_variance_compile_and_gradients(
 ) -> None:
     mx = mlx_backend._require()
     activation = None if act is None else mx.tanh
-    dimensions = (256, 128, 192, 4)
+    dimensions = (1000, 500, 1500, 4)
     module = e3nn.FullyConnectedNet(dimensions, activation, variance_in, variance_out, out_act)
-    values = mx.random.normal(shape=(4096, dimensions[0])) * variance_in**0.5
+    values = mx.random.normal(shape=(2000, dimensions[0])) * variance_in**0.5
     output = module(values) / variance_out**0.5
     if not out_act:
-        assert abs(float(mx.mean(output))) < 0.2
+        assert abs(float(mx.mean(output))) < 0.5
     variance = float(mx.mean(output**2))
-    assert 0.5 < variance < 2.0
+    assert 1.0 / 1.5 < variance < 1.5
     compiled = mx.compile(module)
     assert _max_abs(compiled(values[:8]) - module(values[:8])) < 3e-5
 
