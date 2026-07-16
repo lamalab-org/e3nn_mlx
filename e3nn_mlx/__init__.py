@@ -9,6 +9,9 @@ from .nn_identity import Identity
 from .nn_activation import Activation
 from .nn_dropout import Dropout
 from .nn_extract import Extract, ExtractIr
+from .nn_batchnorm import BatchNorm
+from .nn_fc import FullyConnectedNet
+from .nn_normact import NormActivation
 from .nn_linear import Linear
 from .nn_norm import Norm
 from .ops_rotations import (
@@ -64,11 +67,13 @@ from .ops_tp import (
 __all__ = [
     "ElementwiseTensorProduct",
     "Activation",
+    "BatchNorm",
     "Dropout",
     "Extract",
     "ExtractIr",
     "FullTensorProduct",
     "FullyConnectedTensorProduct",
+    "FullyConnectedNet",
     "FromS2Grid",
     "Gate",
     "Identity",
@@ -79,6 +84,7 @@ __all__ = [
     "MLXBackend",
     "MulIrrep",
     "Norm",
+    "NormActivation",
     "ReducedTensorProducts",
     "SphericalHarmonics",
     "SphericalHarmonicsAlphaBeta",
