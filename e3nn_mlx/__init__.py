@@ -13,6 +13,7 @@ from .nn_batchnorm import BatchNorm
 from .nn_fc import FullyConnectedNet
 from .nn_normact import NormActivation
 from .nn_s2act import S2Activation
+from .nn_so3act import SO3Activation
 from .nn_linear import Linear
 from .nn_norm import Norm
 from .ops_rotations import (
@@ -55,6 +56,7 @@ from .ops_sh import (
 )
 from .ops_reduce_tensor import ReducedTensorProducts
 from .ops_s2 import FromS2Grid, ToS2Grid, s2_grid
+from .ops_so3 import SO3Grid, so3_irreps
 from .ops_tp import (
     ElementwiseTensorProduct,
     FullTensorProduct,
@@ -87,6 +89,8 @@ __all__ = [
     "Norm",
     "NormActivation",
     "S2Activation",
+    "SO3Activation",
+    "SO3Grid",
     "ReducedTensorProducts",
     "SphericalHarmonics",
     "SphericalHarmonicsAlphaBeta",
@@ -115,6 +119,7 @@ __all__ = [
     "mlx_backend",
     "rotation_matrix",
     "s2_grid",
+    "so3_irreps",
     "quaternion_to_angles",
     "quaternion_to_axis_angle",
     "quaternion_to_matrix",
