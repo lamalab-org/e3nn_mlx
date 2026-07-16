@@ -219,10 +219,12 @@ These are hypotheses for experiment design, not measured promises:
   topology if MLX fuses surrounding operations and avoids framework overhead.
 - **Training:** `1.1--2.5x` is plausible for repeatedly reused compiled shapes,
   but gradient tensor products and scatter may narrow or reverse the gain.
-- **Large dense tensor products:** PyTorch/e3nn may match or beat this port.
-  Upstream e3nn has mature generated contraction paths, while the current MLX
-  implementation still expresses paths through general array operations. A
-  `0.3--1.2x` MLX/PyTorch range would not be surprising here.
+- **Large dense tensor products:** unfiltered `FullTensorProduct` now uses a
+  specialized MLX path that forms each input outer product once and applies a
+  combined Clebsch--Gordan basis transform with matrix multiplication. Filtered
+  products and general connection modes retain the instruction-wise fallback,
+  so they should be measured separately rather than inheriting the unfiltered
+  result.
 - **Very small or one-shot calls:** cold compilation can make MLX slower even
   when its steady-state kernel is faster. Break-even iterations are roughly
   `compile_ms / (torch_ms - mlx_ms)` when the denominator is positive.

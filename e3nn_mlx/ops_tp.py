@@ -94,6 +94,32 @@ def _cg_array_data(ir1: Irrep, ir2: Irrep, ir_out: Irrep) -> tuple[tuple[tuple[f
     return clebsch_gordan(ir1, ir2, ir_out)
 
 
+@functools.lru_cache(maxsize=None)
+def _combined_cg_array_data(
+    specifications: tuple[tuple[Irrep, Irrep, Irrep, float], ...],
+) -> tuple[tuple[tuple[float, ...], ...], ...]:
+    """Concatenate normalized CG bases sharing the same pair of input irreps."""
+    if not specifications:
+        return ()
+    tensors = [
+        (_cg_array_data(ir1, ir2, ir_out), scale)
+        for ir1, ir2, ir_out, scale in specifications
+    ]
+    dim1 = specifications[0][0].dim
+    dim2 = specifications[0][1].dim
+    return tuple(
+        tuple(
+            tuple(
+                value * scale
+                for tensor, scale in tensors
+                for value in tensor[index1][index2]
+            )
+            for index2 in range(dim2)
+        )
+        for index1 in range(dim1)
+    )
+
+
 def _couple_blocks(inst: TensorProductInstruction, left: Any, right: Any) -> Any:
     mx, _ = require_mlx()
     if inst.ir_in1.p * inst.ir_in2.p != inst.ir_out.p:
@@ -606,6 +632,7 @@ class FullTensorProduct(TensorProduct):
     ) -> None:
         left = Irreps(irreps_in1).simplify()
         right = Irreps(irreps_in2).simplify()
+        self._full_instruction_groups = None
         self._execution_irreps_out: Irreps | None = None
         self._output_index_groups: tuple[tuple[int, ...], ...] | None = None
         if filter_ir_out is not None:
@@ -633,6 +660,18 @@ class FullTensorProduct(TensorProduct):
             compile_left_right=compile_left_right,
         )
         self._execution_irreps_out = self.irreps_out
+        if filter_ir_out is None:
+            grouped_instructions: dict[
+                tuple[int, int], list[TensorProductInstruction]
+            ] = {}
+            for instruction in self.instructions:
+                grouped_instructions.setdefault(
+                    (instruction.input1_index, instruction.input2_index), []
+                ).append(instruction)
+            self._full_instruction_groups = tuple(
+                (input1, input2, tuple(group))
+                for (input1, input2), group in grouped_instructions.items()
+            )
         grouped_out, index_groups = _group_output_irreps(self._execution_irreps_out)
         self.irreps_out = grouped_out
         self._output_index_groups = index_groups
@@ -664,8 +703,99 @@ class FullTensorProduct(TensorProduct):
             weight_slices=plan.weight_slices,
         )
 
+    def _call_arrays(self, left_array: Any, right_array: Any, weight: Any | None = None) -> Any:
+        if self._full_instruction_groups is None:
+            return super()._call_arrays(left_array, right_array, weight)
+        if weight is not None:
+            raise ValueError("FullTensorProduct does not accept weights")
+        if left_array.dtype != right_array.dtype:
+            raise TypeError(
+                "tensor product inputs must have matching dtypes, got "
+                f"{left_array.dtype} and {right_array.dtype}"
+            )
+        mx, _ = require_mlx()
+        left_leading = tuple(int(size) for size in left_array.shape[:-1])
+        right_leading = tuple(int(size) for size in right_array.shape[:-1])
+        try:
+            leading_shape = mx.broadcast_shapes(left_leading, right_leading)
+        except ValueError as exc:
+            raise ValueError(
+                "tensor product leading shapes are not broadcastable: "
+                f"{left_leading}, {right_leading}"
+            ) from exc
+        if left_leading != leading_shape:
+            left_array = mx.broadcast_to(
+                left_array, (*leading_shape, self.irreps_in1.dim)
+            )
+        if right_leading != leading_shape:
+            right_array = mx.broadcast_to(
+                right_array, (*leading_shape, self.irreps_in2.dim)
+            )
+
+        left_chunks = IrrepsArray(self.irreps_in1, left_array).chunk_arrays()
+        right_chunks = IrrepsArray(self.irreps_in2, right_array).chunk_arrays()
+        output_blocks: dict[Irrep, list[Any]] = {
+            part.ir: [] for part in self.irreps_out
+        }
+        for input1, input2, instructions in self._full_instruction_groups:
+            part1 = self.irreps_in1[input1]
+            part2 = self.irreps_in2[input2]
+            block1 = _reshape_chunk(left_chunks[input1], part1.mul, part1.ir.dim)
+            block2 = _reshape_chunk(right_chunks[input2], part2.mul, part2.ir.dim)
+            specifications = tuple(
+                (
+                    instruction.ir_in1,
+                    instruction.ir_in2,
+                    instruction.ir_out,
+                    instruction.normalization.scale(),
+                )
+                for instruction in instructions
+            )
+            coefficients = mx.array(
+                _combined_cg_array_data(specifications), dtype=left_array.dtype
+            )
+            outer = (
+                block1[..., :, None, :, None]
+                * block2[..., None, :, None, :]
+            ).reshape(
+                *leading_shape,
+                part1.mul,
+                part2.mul,
+                part1.ir.dim * part2.ir.dim,
+            )
+            coupled = outer @ coefficients.reshape(
+                part1.ir.dim * part2.ir.dim, -1
+            )
+            start = 0
+            for instruction in instructions:
+                stop = start + instruction.ir_out.dim
+                output_blocks[instruction.ir_out].append(
+                    coupled[..., start:stop].reshape(
+                        *leading_shape,
+                        part1.mul * part2.mul,
+                        instruction.ir_out.dim,
+                    )
+                )
+                start = stop
+
+        grouped = []
+        for part in self.irreps_out:
+            blocks = output_blocks[part.ir]
+            block = mx.concatenate(blocks, axis=-2) if len(blocks) > 1 else blocks[0]
+            grouped.append(block.reshape(*leading_shape, part.dim))
+        if not grouped:
+            return mx.zeros((*leading_shape, 0), dtype=left_array.dtype)
+        return mx.concatenate(grouped, axis=-1)
+
     def __call__(self, left: IrrepsArray, right: IrrepsArray, weight: Any | None = None) -> IrrepsArray:
-        out = IrrepsArray(self._execution_irreps_out, self._compiled(left.array, right.array, None))
+        if left.irreps.simplify() != self.irreps_in1:
+            raise ValueError(f"left input irreps {left.irreps} do not match {self.irreps_in1}")
+        if right.irreps.simplify() != self.irreps_in2:
+            raise ValueError(f"right input irreps {right.irreps} do not match {self.irreps_in2}")
+        array = self._compiled(left.array, right.array, None)
+        if self._full_instruction_groups is not None:
+            return IrrepsArray(self.irreps_out, array)
+        out = IrrepsArray(self._execution_irreps_out, array)
         return _regroup_output_array(out, self.irreps_out, self._output_index_groups)
 
 

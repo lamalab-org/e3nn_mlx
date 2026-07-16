@@ -302,6 +302,45 @@ def test_full_tensor_product_matches_explicit_tensor_product() -> None:
     assert _max_diff(out.array, regrouped) < 2e-5
 
 
+def test_optimized_full_tensor_product_matches_fallback_outputs_and_gradients() -> None:
+    mx = mlx_backend._require()
+    irreps = "2x0e + 2x1o + 2x2e"
+    optimized = FullTensorProduct(irreps, irreps)
+    fallback = FullTensorProduct(
+        irreps,
+        irreps,
+        filter_ir_out=[part.ir for part in optimized.irreps_out],
+    )
+    size = 3 * optimized.irreps_in1.dim
+    left = mx.arange(size, dtype=mx.float32).reshape(3, -1) / max(size, 1)
+    right = mx.arange(size - 1, -1, -1, dtype=mx.float32).reshape(3, -1) / max(
+        size, 1
+    )
+
+    def run(module, first, second):
+        return module(
+            IrrepsArray(module.irreps_in1, first),
+            IrrepsArray(module.irreps_in2, second),
+        ).array
+
+    expected = run(fallback, left, right)
+    actual = run(optimized, left, right)
+    assert float(mx.max(mx.abs(actual - expected))) < 3e-5
+
+    def loss(module, first, second):
+        return mx.mean(run(module, first, second) ** 2)
+
+    optimized_grad = mx.grad(
+        lambda first, second: loss(optimized, first, second), argnums=(0, 1)
+    )(left, right)
+    fallback_grad = mx.grad(
+        lambda first, second: loss(fallback, first, second), argnums=(0, 1)
+    )(left, right)
+    mx.eval(actual, expected, *optimized_grad, *fallback_grad)
+    for candidate, reference in zip(optimized_grad, fallback_grad, strict=True):
+        assert float(mx.max(mx.abs(candidate - reference))) < 3e-5
+
+
 def test_fully_connected_tensor_product_matches_explicit_tensor_product() -> None:
     left = IrrepsArray("1o", mlx_backend.asarray([[1.0, 2.0, 3.0]]))
     right = IrrepsArray("1o", mlx_backend.asarray([[4.0, 5.0, 6.0]]))
