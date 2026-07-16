@@ -50,3 +50,12 @@ The complete modular June 2021 family is available from
 eager dictionary input and compiled fixed-edge execution. See
 [`docs/V2106_POINT_MODELS.md`](docs/V2106_POINT_MODELS.md) for their APIs,
 compilation boundary, upstream semantics, and verification coverage.
+
+## Performance evaluation
+
+The isolated cross-framework harness in [`evals/`](evals/README.md) compares
+MLX eager/compiled execution with upstream PyTorch/e3nn on Apple Silicon. It
+covers spherical harmonics, tensor products, Linear, v2106 convolution,
+message passing, and an end-to-end attributed network in forward and training
+modes. Small smoke presets, larger scaling experiments, synchronized timing,
+JSON/CSV results, and dependency-free SVG/HTML plot generation are included.

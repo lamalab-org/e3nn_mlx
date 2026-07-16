@@ -7,4 +7,6 @@ htmlcov/
 build/
 dist/
 .DS_Store
+evals/.venv-torch/
+evals/results/
 
