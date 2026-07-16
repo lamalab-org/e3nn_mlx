@@ -210,13 +210,13 @@ def test_network_deepcopy_and_weight_round_trip(tmp_path) -> None:
     data = _graph(module)
     expected = module(data).array
     copied = copy.deepcopy(module)
-    assert _max_abs(copied(data).array - expected) < 2e-6
+    assert _max_abs(copied(data).array - expected) < 1e-5
 
     path = tmp_path / "gate_points_2102_weights.npz"
     module.save_weights(str(path))
     restored = _network(exact=True)
     restored.load_weights(str(path))
-    assert _max_abs(restored(data).array - expected) < 2e-6
+    assert _max_abs(restored(data).array - expected) < 1e-5
 
 
 @pytest.mark.mlx

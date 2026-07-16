@@ -10,7 +10,8 @@ The P0 implementation currently provides:
 - spherical harmonics generated recursively from the canonical Wigner basis
 - weighted and unweighted MLX tensor products and standard wrappers
 - lightweight MLX Linear, Gate, Norm, and reduction operations
-- graph/radial utilities and the gated `gate_points_2102` point-cloud network
+- graph/radial utilities, the gated `gate_points_2102` network, and the complete
+  modular `v2106` point-model family
 - pinned upstream e3nn numerical fixtures and Apple-Silicon CI coverage
 
 P0 guarantees numerical compatibility through `l=6`; reference and structural
@@ -42,3 +43,10 @@ a device-side dynamic nonzero operation. For compiled training or inference,
 construct the topology once and call `Network.forward_with_edges`; the radial
 embedding, spherical harmonics, message passing, gating, and graph reduction
 then remain inside the compiled MLX graph.
+
+The complete modular June 2021 family is available from
+`e3nn_mlx.models.v2106`. It includes `Convolution`, `MessagePassing`,
+`SimpleNetwork`, and `NetworkForAGraphWithAttributes`; both networks support
+eager dictionary input and compiled fixed-edge execution. See
+[`docs/V2106_POINT_MODELS.md`](docs/V2106_POINT_MODELS.md) for their APIs,
+compilation boundary, upstream semantics, and verification coverage.
