@@ -1,6 +1,15 @@
 """MLX-native e3nn runtime."""
 
-from e3nn_core import Irrep, Irreps, MulIrrep, su2_generators, wigner_3j
+from e3nn_core import (
+    Irrep,
+    Irreps,
+    MulIrrep,
+    TensorProductInstruction as Instruction,
+    change_basis_real_to_complex,
+    so3_generators,
+    su2_generators,
+    wigner_3j,
+)
 
 from .backend import MLXBackend, mlx_backend
 from .irreps_array import IrrepsArray
@@ -73,6 +82,9 @@ from .ops_tp import (
     tensor_product,
     tensor_product_plan,
 )
+from . import math, nn, o3
+
+wigner_D = wigner_d
 
 __all__ = [
     "ElementwiseTensorProduct",
@@ -89,6 +101,7 @@ __all__ = [
     "GatePointsConvolution",
     "GatePointsNetwork",
     "Identity",
+    "Instruction",
     "Irrep",
     "Irreps",
     "IrrepsArray",
@@ -120,6 +133,7 @@ __all__ = [
     "compose_angles",
     "compose_axis_angle",
     "compose_quaternion",
+    "change_basis_real_to_complex",
     "identity_angles",
     "inverse_angles",
     "irreps_wigner_d",
@@ -129,7 +143,10 @@ __all__ = [
     "matrix_x",
     "matrix_y",
     "matrix_z",
+    "math",
     "mlx_backend",
+    "nn",
+    "o3",
     "rotation_matrix",
     "radius_graph",
     "s2_grid",
@@ -138,6 +155,7 @@ __all__ = [
     "soft_one_hot_linspace",
     "soft_unit_step",
     "so3_irreps",
+    "so3_generators",
     "quaternion_to_angles",
     "quaternion_to_axis_angle",
     "quaternion_to_matrix",
@@ -152,6 +170,7 @@ __all__ = [
     "tensor_product",
     "tensor_product_plan",
     "wigner_3j",
+    "wigner_D",
     "wigner_d",
     "xyz_to_angles",
 ]

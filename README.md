@@ -19,6 +19,27 @@ tests exercise selected operations through `l=8`.  See
 [`docs/P0_COMPATIBILITY.md`](docs/P0_COMPATIBILITY.md) for conventions, shapes,
 normalization, and the release gate.
 
+## e3nn-style API
+
+New code can use the familiar upstream namespace layout with ordinary MLX
+arrays:
+
+```python
+import mlx.core as mx
+from e3nn_mlx import nn, o3
+
+linear = o3.Linear("16x0e + 16x1o", "32x0e + 16x1o")
+x = mx.random.normal((128, linear.irreps_in.dim))
+y = linear(x)
+```
+
+`e3nn_mlx.o3`, `e3nn_mlx.nn`, `e3nn_mlx.math`, and
+`e3nn_mlx.nn.models.v2106` mirror the implemented PyTorch/e3nn organization.
+Raw inputs return raw MLX arrays; `IrrepsArray` inputs preserve typed outputs.
+The original flat API remains backward-compatible. See
+[`docs/HIGH_LEVEL_API.md`](docs/HIGH_LEVEL_API.md) for migration examples,
+model imports, compilation, deliberate differences, and no-overhead evidence.
+
 ## Development
 
 Install the MLX and test extras and run the suite on Apple Silicon:

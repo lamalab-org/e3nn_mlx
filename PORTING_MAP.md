@@ -45,18 +45,20 @@ This document anchors the first migration slice and records the intended ownersh
    - numerical operators grouped by concern
 7. `e3nn_mlx.nn_*`
    - lightweight module wrappers over coarse MLX kernels
+8. `e3nn_mlx.o3`, `e3nn_mlx.nn`, and `e3nn_mlx.math`
+   - e3nn-shaped high-level namespaces
+   - raw MLX array input/output for upstream-style code
+   - type-preserving `IrrepsArray` dispatch for representation-aware code
+9. `e3nn_mlx.nn.models`
+   - upstream-shaped model import paths and raw-array boundary adapters
+   - delegates to the canonical implementations in `e3nn_mlx.models`
 
-## Intentional MVP Deviations
+## Intentional deviations
 
-- No attempt at full PyTorch parity in the first slice.
-- Numerical Wigner/CG tables are deferred; only symbolic metadata lands now.
 - `e3nn_mlx` imports MLX lazily so the package can be imported in environments where MLX
   is not installed.
-- Tests use `unittest` for now because the workspace does not yet have `pytest`.
-
-## Immediate Next Steps
-
-1. Finish static metadata and protocol seams.
-2. Add `IrrepsArray` with deterministic chunk metadata.
-3. Implement rotations/Wigner helpers on top of MLX.
-4. Add spherical harmonics and tensor product, symbolic first and numeric second.
+- The high-level namespaces cover implemented functionality rather than claiming full
+  upstream PyTorch/e3nn parity.
+- `Irreps` remains backend-neutral and therefore does not allocate random MLX arrays.
+- The canonical numerical implementations remain in `ops_*`, `nn_*`, and `models`; the
+  high-level packages are zero-copy compatibility adapters rather than duplicate kernels.
