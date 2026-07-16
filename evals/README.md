@@ -6,7 +6,7 @@ This directory measures equivalent equivariant work in the MLX port and in
 upstream PyTorch/e3nn on Apple Silicon. It is designed to answer three separate
 questions:
 
-1. Which low-level operations currently favor MLX or PyTorch MPS?
+1. Which low-level operations currently favor MLX, PyTorch MPS, or PyTorch CPU?
 2. Does MLX graph compilation amortize its cold-start cost for realistic point
    models?
 3. At what tensor, edge, and model sizes do launch overhead, memory bandwidth,
@@ -84,6 +84,18 @@ Run all small cases on MLX GPU and PyTorch MPS, then generate plots:
 python3 evals/run.py --backend both --preset smoke --plot
 ```
 
+Add the CPU reference to the same isolated comparison with:
+
+```bash
+python3 evals/run.py --backend both --torch-device both --preset smoke --plot
+```
+
+This launches three workers: MLX, `torch-mps`, and `torch-cpu`. The Torch
+workers are separate processes so CPU allocator state and MPS unified-memory
+state do not contaminate one another. Their JSON rows and plot labels remain
+distinct. To compare only MLX with Torch CPU, use `--torch-device cpu`; to run
+only the CPU reference, use `--backend torch --torch-device cpu`.
+
 The default interpreters are:
 
 - MLX: `.venv/bin/python`
@@ -95,7 +107,7 @@ Override them when needed:
 python3 evals/run.py --backend both --preset smoke \
   --mlx-python /path/to/mlx-python \
   --torch-python /path/to/torch-python \
-  --torch-device mps --plot
+  --torch-device both --plot
 ```
 
 PyTorch eager is the default reference because `torch.compile` support and
@@ -142,6 +154,13 @@ python3 evals/plot_results.py evals/results/*/combined.json \
   --output-dir evals/results/large-comparison-plots
 ```
 
+For a three-way large-scale comparison, add `--torch-device both` to each
+invocation. CPU runs can take much longer than GPU runs at this scale; first
+validate the command with `smoke`, then use `medium`, and reserve `large` for
+the cases where the CPU baseline is scientifically useful. Keep CPU frequency,
+power mode, and background load stable, and alternate `--backend-order` across
+repetitions to reduce thermal-order bias.
+
 Start with forward-only runs if memory is uncertain:
 
 ```bash
@@ -165,9 +184,9 @@ distinguishes constant launch overhead from asymptotic tensor-product cost.
 
 ## Timing methodology
 
-- Every invocation is synchronized with `mx.synchronize()` or
-  `torch.mps.synchronize()` before the wall-clock sample ends. Without this,
-  asynchronous GPU submission would be mistaken for execution time.
+- Every GPU invocation is synchronized with `mx.synchronize()` or
+  `torch.mps.synchronize()` before the wall-clock sample ends. Torch CPU calls
+  are synchronous, so returning from the call is their timing boundary.
 - Warmups happen before recorded samples.
 - The report uses the median; raw samples and interquartile ranges remain in
   JSON for variance inspection.
@@ -222,7 +241,8 @@ Each run creates a timestamped directory under `evals/results/` containing
 backend JSON files and `combined.json`. `--plot` adds:
 
 - `latency_forward.svg` and `latency_train.svg`;
-- `speedup_forward.svg` and `speedup_train.svg`;
+- `speedup_forward.svg` and `speedup_train.svg`, with separate Torch MPS and
+  Torch CPU reference bars when both are present;
 - `compile_cost.svg`;
 - `peak_memory.svg`;
 - `scaling_<case>.svg` log-log throughput curves when multiple sizes of a case

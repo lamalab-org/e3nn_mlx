@@ -190,3 +190,32 @@ def test_v2106_network_compatibility_path_returns_raw_but_legacy_path_stays_type
     typed_result = compatibility(typed_data)
     assert isinstance(typed_result, IrrepsArray)
     assert _max_abs(typed_result.array - raw) < 2e-6
+
+
+@pytest.mark.mlx
+def test_high_level_v2106_network_rotates_outputs_with_inputs() -> None:
+    """Exercise equivariance through the public e3nn-shaped model path."""
+    mx = mlx_backend._require()
+    from e3nn_mlx import o3
+    from e3nn_mlx.nn.models.v2106 import SimpleNetwork
+
+    module = SimpleNetwork(
+        "0e + 1o", "0e + 1o + 2e", 2.0, 3.0, 4.0, mul=3, layers=1, lmax=2
+    )
+    positions = mx.array(
+        [[0.0, 0.0, 0.0], [0.6, 0.1, 0.0], [-0.2, 0.7, 0.1], [0.1, -0.3, 0.8]]
+    )
+    features = mx.random.normal(shape=(4, module.irreps_in.dim))
+    baseline = module({"pos": positions, "x": features})
+    angles = o3.rand_angles()
+    rotation = o3.angles_to_matrix(*angles)
+    d_in = o3.irreps_wigner_d(module.irreps_in, *angles)
+    d_out = o3.irreps_wigner_d(module.irreps_out, *angles)
+    rotated = module(
+        {
+            "pos": positions @ mx.swapaxes(rotation, -1, -2),
+            "x": features @ mx.swapaxes(d_in, -1, -2),
+        }
+    )
+    expected = baseline @ mx.swapaxes(d_out, -1, -2)
+    assert _max_abs(rotated - expected) < 3e-3

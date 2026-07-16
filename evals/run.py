@@ -39,7 +39,12 @@ def parse_args(argv=None):
     parser.add_argument(
         "--torch-python", type=Path, default=ROOT / "evals/.venv-torch/bin/python"
     )
-    parser.add_argument("--torch-device", choices=("auto", "mps", "cpu"), default="auto")
+    parser.add_argument(
+        "--torch-device",
+        choices=("auto", "mps", "cpu", "both"),
+        default="auto",
+        help="Torch device to benchmark; 'both' runs isolated MPS and CPU workers",
+    )
     parser.add_argument("--torch-compile", action="store_true")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "evals/results")
     parser.add_argument("--plot", action="store_true")
@@ -47,7 +52,14 @@ def parse_args(argv=None):
     return parser.parse_args(argv)
 
 
-def worker_command(backend: str, interpreter: Path, output: Path, args) -> list[str]:
+def worker_command(
+    backend: str,
+    interpreter: Path,
+    output: Path,
+    args,
+    *,
+    torch_device: str | None = None,
+) -> list[str]:
     command = [
         str(interpreter),
         str(ROOT / "evals/run_backend.py"),
@@ -69,7 +81,7 @@ def worker_command(backend: str, interpreter: Path, output: Path, args) -> list[
     for override in args.overrides:
         command.extend(["--set", override])
     if backend == "torch":
-        command.extend(["--device", args.torch_device])
+        command.extend(["--device", torch_device or args.torch_device])
         if args.torch_compile:
             command.append("--torch-compile")
     if args.fail_on_error:
@@ -77,25 +89,36 @@ def worker_command(backend: str, interpreter: Path, output: Path, args) -> list[
     return command
 
 
+def selected_workers(args) -> list[tuple[str, str | None]]:
+    """Return backend/device workers in the requested thermal ordering."""
+    torch_devices = (
+        ["mps", "cpu"] if args.torch_device == "both" else [args.torch_device]
+    )
+    torch_workers = [("torch", device) for device in torch_devices]
+    if args.backend == "mlx":
+        return [("mlx", None)]
+    if args.backend == "torch":
+        return torch_workers
+    mlx_worker = [("mlx", None)]
+    return (
+        mlx_worker + torch_workers
+        if args.backend_order == "mlx-first"
+        else torch_workers + mlx_worker
+    )
+
+
 def main(argv=None) -> int:
     args = parse_args(argv)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     run_dir = args.output_dir / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
-    if args.backend == "both":
-        selected = (
-            ["mlx", "torch"]
-            if args.backend_order == "mlx-first"
-            else ["torch", "mlx"]
-        )
-    else:
-        selected = [args.backend]
     interpreters = {"mlx": args.mlx_python, "torch": args.torch_python}
     outputs = []
     failures = 0
-    for backend in selected:
+    for backend, torch_device in selected_workers(args):
         interpreter = interpreters[backend]
-        output = run_dir / f"{backend}.json"
+        result_name = f"torch-{torch_device}" if backend == "torch" else backend
+        output = run_dir / f"{result_name}.json"
         if not interpreter.exists():
             print(
                 f"{backend} interpreter does not exist: {interpreter}\n"
@@ -104,7 +127,13 @@ def main(argv=None) -> int:
             )
             failures += 1
             continue
-        command = worker_command(backend, interpreter, output, args)
+        command = worker_command(
+            backend,
+            interpreter,
+            output,
+            args,
+            torch_device=torch_device,
+        )
         print("Running:", " ".join(command), flush=True)
         completed = subprocess.run(command, cwd=ROOT, check=False)
         if output.exists():

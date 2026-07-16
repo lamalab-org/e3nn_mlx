@@ -8,6 +8,7 @@ import pytest
 
 from evals.common import SCHEMA_VERSION, load_documents, summarize, write_document
 from evals.plot_results import main as plot_main, speedup_entries, write_scaling_plots
+from evals.run import parse_args, selected_workers, worker_command
 from evals.run_backend import apply_overrides
 from evals.workloads import case_names, get_workloads, ring_edges, spherical_irreps
 
@@ -57,10 +58,12 @@ def test_overrides_are_typed_and_validated() -> None:
 
 def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
     rows = [
-        _row("torch", "eager", 4.0),
+        _row("torch-mps", "eager", 4.0),
+        _row("torch-cpu", "eager", 10.0),
         _row("mlx", "eager", 2.0),
         _row("mlx", "compiled", 1.0),
-        _row("torch", "eager", 8.0, phase="train"),
+        _row("torch-mps", "eager", 8.0, phase="train"),
+        _row("torch-cpu", "eager", 12.0, phase="train"),
         _row("mlx", "compiled", 2.0, phase="train"),
     ]
     result_path = tmp_path / "results.json"
@@ -74,7 +77,7 @@ def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
     assert loaded_metadata == [metadata]
     assert loaded_rows == rows
     forward_speedups = speedup_entries(rows, "forward")
-    assert [entry[1] for entry in forward_speedups] == [2.0, 4.0]
+    assert sorted(entry[1] for entry in forward_speedups) == [2.0, 4.0, 5.0, 10.0]
 
     output = tmp_path / "plots"
     assert plot_main([str(result_path), "--output-dir", str(output)]) == 0
@@ -90,7 +93,9 @@ def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
     }
     assert expected == {path.name for path in output.iterdir()}
     assert "4.00×" in (output / "speedup_forward.svg").read_text()
-    assert "torch-eager" in (output / "latency_forward.svg").read_text()
+    latency = (output / "latency_forward.svg").read_text()
+    assert "torch-mps-eager" in latency
+    assert "torch-cpu-eager" in latency
     assert json.loads(result_path.read_text())["metadata"]["schema_version"] == 1
 
 
@@ -105,3 +110,29 @@ def test_scaling_plot_uses_multiple_workload_sizes(tmp_path) -> None:
     plot = (tmp_path / generated[0]).read_text()
     assert "throughput scaling" in plot
     assert "mlx-compiled" in plot
+
+
+def test_torch_both_expands_to_isolated_mps_and_cpu_workers(tmp_path) -> None:
+    args = parse_args(
+        [
+            "--backend",
+            "both",
+            "--torch-device",
+            "both",
+            "--torch-python",
+            str(tmp_path / "torch-python"),
+        ]
+    )
+    assert selected_workers(args) == [
+        ("mlx", None),
+        ("torch", "mps"),
+        ("torch", "cpu"),
+    ]
+    command = worker_command(
+        "torch",
+        args.torch_python,
+        tmp_path / "torch-cpu.json",
+        args,
+        torch_device="cpu",
+    )
+    assert command[command.index("--device") + 1] == "cpu"

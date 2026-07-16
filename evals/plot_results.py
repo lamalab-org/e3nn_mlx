@@ -23,6 +23,10 @@ COLORS = {
     "mlx-eager": "#8b8be8",
     "torch-compiled": "#d95f42",
     "torch-eager": "#ed947f",
+    "torch-mps-compiled": "#d95f42",
+    "torch-mps-eager": "#ed947f",
+    "torch-cpu-compiled": "#b36b00",
+    "torch-cpu-eager": "#e0a32f",
     "speedup": "#2f9e73",
     "slowdown": "#d95f42",
     "compile": "#8d65b5",
@@ -193,21 +197,26 @@ def speedup_entries(rows, phase: str):
         ] = row
     entries = []
     for (preset, case, config_json), group in sorted(groups.items()):
-        torch_row = group.get("torch-eager")
-        if torch_row is None:
-            continue
-        for mlx_label in ("mlx-eager", "mlx-compiled"):
-            mlx_row = group.get(mlx_label)
-            if mlx_row is None:
-                continue
-            ratio = float(torch_row["median_ms"]) / float(mlx_row["median_ms"])
-            entries.append(
-                (
-                    f"{case} [{preset}; {_config_label(json.loads(config_json))}] · {mlx_label}",
-                    ratio,
-                    "speedup" if ratio >= 1.0 else "slowdown",
+        torch_labels = [
+            label
+            for label in ("torch-eager", "torch-mps-eager", "torch-cpu-eager")
+            if label in group
+        ]
+        for torch_label in torch_labels:
+            torch_row = group[torch_label]
+            for mlx_label in ("mlx-eager", "mlx-compiled"):
+                mlx_row = group.get(mlx_label)
+                if mlx_row is None:
+                    continue
+                ratio = float(torch_row["median_ms"]) / float(mlx_row["median_ms"])
+                entries.append(
+                    (
+                        f"{case} [{preset}; {_config_label(json.loads(config_json))}] "
+                        f"· {mlx_label} vs {torch_label}",
+                        ratio,
+                        "speedup" if ratio >= 1.0 else "slowdown",
+                    )
                 )
-            )
     return entries
 
 
@@ -427,7 +436,10 @@ def main(argv=None) -> int:
         horizontal_bars(
             args.output_dir / speedup_name,
             title=f"MLX {phase} speed relative to PyTorch eager",
-            subtitle="Ratio = PyTorch median / MLX median; above 1× favors MLX.",
+            subtitle=(
+                "Separate MPS and CPU ratios = PyTorch median / MLX median; "
+                "above 1× favors MLX."
+            ),
             entries=speedup_entries(rows, phase),
             unit="x",
             reference=1.0,

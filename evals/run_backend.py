@@ -176,7 +176,8 @@ def main(argv=None) -> int:
         )
         device = implementation.backend_metadata()["device"]
 
-    metadata = new_run_metadata(args.preset, args.backend, device)
+    result_backend = f"torch-{device}" if args.backend == "torch" else args.backend
+    metadata = new_run_metadata(args.preset, result_backend, device)
     metadata["backend_details"] = implementation.backend_metadata()
     metadata["timing"] = {
         "warmup": warmup,
@@ -186,14 +187,14 @@ def main(argv=None) -> int:
     metadata["overrides"] = args.overrides
     results = []
     for name, config in workloads.items():
-        print(f"[{args.backend}] constructing {name}", flush=True)
+        print(f"[{result_backend}] constructing {name}", flush=True)
         try:
             task = implementation.BUILDERS[name](config)
         except Exception as exc:
             results.append(
                 {
                     "preset": args.preset,
-                    "backend": args.backend,
+                    "backend": result_backend,
                     "execution": "construction",
                     "phase": "setup",
                     "case": name,
@@ -220,10 +221,10 @@ def main(argv=None) -> int:
             if task.compile_train is not None:
                 modes.append(("compiled", "train", None, task.compile_train))
         for execution, phase, function, compiler in modes:
-            print(f"[{args.backend}] {name}: {execution} {phase}", flush=True)
+            print(f"[{result_backend}] {name}: {execution} {phase}", flush=True)
             row = benchmark_mode(
                 task,
-                backend=args.backend,
+                backend=result_backend,
                 execution=execution,
                 phase=phase,
                 function=function,
