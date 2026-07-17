@@ -80,3 +80,6 @@ covers spherical harmonics, tensor products, Linear, v2106 convolution,
 message passing, and an end-to-end attributed network in forward and training
 modes. Small smoke presets, larger scaling experiments, synchronized timing,
 JSON/CSV results, and dependency-free SVG/HTML plot generation are included.
+Generated Metal kernels and the reproducible kernel/general-MLX/Torch-CPU
+comparison are documented in
+[`evals/KERNEL_EVALUATION.md`](evals/KERNEL_EVALUATION.md).

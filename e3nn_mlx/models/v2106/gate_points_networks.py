@@ -58,6 +58,7 @@ class _PointNetworkBase(mlx_module_base()):
             edge_vectors,
             normalize=True,
             normalization="component",
+            use_custom_kernel=False,
         )
         edge_lengths = mx.sqrt(mx.sum(edge_vectors * edge_vectors, axis=-1))
         edge_scalars = soft_one_hot_linspace(

@@ -9,6 +9,14 @@ from .common import Task
 from .workloads import CASE_DESCRIPTIONS, ring_edges, spherical_irreps
 
 
+_USE_CUSTOM_KERNELS = True
+
+
+def configure(*, use_custom_kernels: bool = True) -> None:
+    global _USE_CUSTOM_KERNELS
+    _USE_CUSTOM_KERNELS = bool(use_custom_kernels)
+
+
 def _imports():
     import mlx.core as mx
     import mlx.nn as nn
@@ -98,6 +106,7 @@ def _edge_data(config):
         edge_vectors,
         normalize=True,
         normalization="component",
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
     return edge_src, edge_dst, edge_vectors, irreps_edge, edge_attr
 
@@ -109,7 +118,11 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
 
     def raw(value):
         return e3nn.spherical_harmonics(
-            degrees, value, normalize=True, normalization="component"
+            degrees,
+            value,
+            normalize=True,
+            normalization="component",
+            use_custom_kernel=_USE_CUSTOM_KERNELS,
         )
 
     def loss(value):
@@ -132,7 +145,9 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
 def build_full_tensor_product(config: dict[str, Any]) -> Task:
     mx, _, e3nn, _, _, _ = _imports()
     irreps = spherical_irreps(config["mul"], config["lmax"])
-    module = e3nn.FullTensorProduct(irreps, irreps)
+    module = e3nn.FullTensorProduct(
+        irreps, irreps, use_custom_kernel=_USE_CUSTOM_KERNELS
+    )
     left = mx.random.normal(shape=(config["items"], module.irreps_in1.dim))
     right = mx.random.normal(shape=(config["items"], module.irreps_in2.dim))
 
@@ -169,7 +184,9 @@ def build_full_tensor_product(config: dict[str, Any]) -> Task:
 def build_fully_connected_tensor_product(config: dict[str, Any]) -> Task:
     mx, _, e3nn, _, _, _ = _imports()
     irreps = spherical_irreps(config["mul"], config["lmax"])
-    module = e3nn.FullyConnectedTensorProduct(irreps, irreps, irreps)
+    module = e3nn.FullyConnectedTensorProduct(
+        irreps, irreps, irreps, use_custom_kernel=_USE_CUSTOM_KERNELS
+    )
     left = mx.random.normal(shape=(config["items"], module.irreps_in1.dim))
     right = mx.random.normal(shape=(config["items"], module.irreps_in2.dim))
 
@@ -234,6 +251,7 @@ def _convolution_fixture(config):
         irreps_node,
         [radial, radial_hidden],
         float(config["neighbors"]),
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
     return mx, e3nn, module, edge_src, edge_dst, edge_attr
 
@@ -278,7 +296,12 @@ def build_scatter_sum(config: dict[str, Any]) -> Task:
     source = mx.random.normal(shape=(edge_src.shape[0], width))
 
     def raw(values):
-        return e3nn.scatter_sum(values, edge_dst, config["nodes"])
+        return e3nn.scatter_sum(
+            values,
+            edge_dst,
+            config["nodes"],
+            use_custom_kernel=_USE_CUSTOM_KERNELS,
+        )
 
     value_grad = mx.value_and_grad(lambda values: mx.mean(raw(values) ** 2))
     return _task(

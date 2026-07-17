@@ -94,6 +94,18 @@ Add the CPU reference to the same isolated comparison with:
 python3 evals/run.py --backend both --torch-device both --preset smoke --plot
 ```
 
+To compare generated Metal kernels, the original general MLX implementation,
+and Torch CPU in the same run:
+
+```bash
+python3 evals/run.py --backend both --torch-device cpu \
+  --mlx-kernels both --preset medium --plot
+```
+
+See [KERNEL_EVALUATION.md](KERNEL_EVALUATION.md) for kernel coverage,
+selection/fallback rules, focused scaling commands, and current measured
+crossovers.
+
 This launches three workers: MLX, `torch-mps`, and `torch-cpu`. The Torch
 workers are separate processes so CPU allocator state and MPS unified-memory
 state do not contaminate one another. Their JSON rows and plot labels remain
@@ -257,6 +269,8 @@ backend JSON files and `combined.json`. `--plot` adds:
 - `latency_forward.svg` and `latency_train.svg`;
 - `speedup_forward.svg` and `speedup_train.svg`, with separate Torch MPS and
   Torch CPU reference bars when both are present;
+- `kernel_speedup_forward.svg` and `kernel_speedup_train.svg` when both
+  generated-kernel and no-kernel MLX workers are present;
 - `compile_cost.svg`;
 - `peak_memory.svg`;
 - `scaling_<case>.svg` log-log throughput curves when multiple sizes of a case

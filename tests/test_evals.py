@@ -86,6 +86,8 @@ def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
         "latency_train.svg",
         "speedup_forward.svg",
         "speedup_train.svg",
+        "kernel_speedup_forward.svg",
+        "kernel_speedup_train.svg",
         "compile_cost.svg",
         "peak_memory.svg",
         "summary.csv",
@@ -124,9 +126,9 @@ def test_torch_both_expands_to_isolated_mps_and_cpu_workers(tmp_path) -> None:
         ]
     )
     assert selected_workers(args) == [
-        ("mlx", None),
-        ("torch", "mps"),
-        ("torch", "cpu"),
+        ("mlx", None, "on"),
+        ("torch", "mps", None),
+        ("torch", "cpu", None),
     ]
     command = worker_command(
         "torch",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 import functools
 from math import prod
@@ -13,6 +14,12 @@ from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 
 from .compat import mlx_module_base, require_mlx
 from .irreps_array import IrrepsArray
+from ._metal_tp import (
+    build_channel_metadata,
+    build_metadata,
+    make_channel_operation,
+    make_operation,
+)
 from .ops_basic import compile_or_identity, get_extension
 
 
@@ -486,6 +493,7 @@ class TensorProduct(mlx_module_base()):
         internal_weights: bool | None = None,
         shared_weights: bool = True,
         compile_left_right: bool = True,
+        use_custom_kernel: bool = True,
     ) -> None:
         super().__init__()
         mx, _ = require_mlx()
@@ -504,6 +512,7 @@ class TensorProduct(mlx_module_base()):
             path_normalization=path_normalization,
         )
         self.shared_weights = shared_weights
+        self.use_custom_kernel = bool(use_custom_kernel)
         if internal_weights is None:
             self.internal_weights = any(ins[4] for ins in instructions) and shared_weights
         else:
@@ -528,11 +537,34 @@ class TensorProduct(mlx_module_base()):
         self.weight_numel = start
         self.weight = mx.random.normal(shape=(self.weight_numel,)) if self.internal_weights and self.weight_numel else None
         self._output_mask = self._build_output_mask(mx)
+        self._metal_dummy_weight = mx.zeros((0,), dtype=mx.float32)
+        self._metal_operation = None
+        self._configure_metal()
         self._compiled = compile_or_identity(self._call_arrays, enabled=compile_left_right)
 
     @property
     def output_mask(self):
         return self._output_mask
+
+    def __deepcopy__(self, memo):
+        """Copy module state without trying to pickle compiled callables.
+
+        MLX compiled functions and custom functions are process-local runtime
+        objects. The copied module keeps identical parameters and semantics and
+        lazily uses the general array implementation.
+        """
+
+        duplicate = self.__class__.__new__(self.__class__)
+        memo[id(self)] = duplicate
+        for name, value in self.items():
+            duplicate[name] = copy.deepcopy(value, memo)
+        for name, value in self.__dict__.items():
+            if name in {"_metal_operation", "_compiled"}:
+                continue
+            setattr(duplicate, name, copy.deepcopy(value, memo))
+        duplicate._metal_operation = None
+        duplicate._compiled = duplicate._call_arrays
+        return duplicate
 
     def _build_output_mask(self, mx):
         chunks = []
@@ -560,10 +592,146 @@ class TensorProduct(mlx_module_base()):
             weight_slices=weight_slices,
         )
 
-    def _call_arrays(self, left_array: Any, right_array: Any, weight: Any | None = None) -> Any:
+    def _configure_metal(
+        self,
+        *,
+        output_irreps: Irreps | None = None,
+        output_maps: tuple[tuple[int, ...], ...] | None = None,
+    ) -> None:
+        if not self.use_custom_kernel or not self.instructions:
+            self._metal_operation = None
+            return
+        weighted_flags = {instruction.has_weight for instruction in self.instructions}
+        if len(weighted_flags) != 1:
+            self._metal_operation = None
+            return
+        plan = self._plan(self.weight_numel > 0)
+        weighted_lookup = {
+            index: weight_slice
+            for index, weight_slice in zip(
+                plan.weighted_instruction_indices,
+                plan.weight_slices,
+                strict=True,
+            )
+        }
+        general = lambda first, second, value: self._general_call_arrays(
+            first,
+            second,
+            value if self.weight_numel > 0 else None,
+        )
+        if output_maps is None:
+            channel_metadata = build_channel_metadata(
+                plan.irreps_in1,
+                plan.irreps_in2,
+                output_irreps or plan.irreps_out,
+                plan.instructions,
+                weighted_lookup,
+            )
+            if channel_metadata is not None:
+                self._metal_operation = make_channel_operation(
+                    channel_metadata,
+                    self.irreps_in1.dim,
+                    self.irreps_in2.dim,
+                    general,
+                )
+                self._metal_kernel_kind = "channel_uvu"
+                return
+
+        estimated_terms = 0
+        for instruction in self.instructions:
+            connection_count = prod(instruction.path_shape)
+            coefficient_count = sum(
+                value != 0.0
+                for plane in _cg_array_data(
+                    instruction.ir_in1,
+                    instruction.ir_in2,
+                    instruction.ir_out,
+                )
+                for row in plane
+                for value in row
+            )
+            estimated_terms += connection_count * coefficient_count
+        self._metal_path_count = estimated_terms
+        # Direct scalar paths are ideal for sparse edge contractions, but dense
+        # multiplicity mixing belongs in MLX's matrix kernels. Guard before
+        # allocating padded metadata, which can otherwise be much larger than
+        # the learned parameter tensor for high-multiplicity uvw products.
+        if estimated_terms > 2_000_000:
+            self._metal_operation = None
+            return
+        metadata = build_metadata(
+            plan.irreps_in1,
+            plan.irreps_in2,
+            output_irreps or plan.irreps_out,
+            plan.instructions,
+            weighted_lookup,
+            output_maps=output_maps,
+        )
+        self._metal_operation = make_operation(
+            metadata,
+            self.irreps_in1.dim,
+            self.irreps_in2.dim,
+            general,
+        )
+        self._metal_kernel_kind = "scalar_paths"
+
+    def _try_metal(
+        self, left_array: Any, right_array: Any, weight: Any | None
+    ) -> Any | None:
+        mx, _ = require_mlx()
+        if (
+            self._metal_operation is None
+            or left_array.dtype != mx.float32
+            or right_array.dtype != mx.float32
+            or left_array.ndim != 2
+            or right_array.ndim != 2
+            or left_array.shape[0] != right_array.shape[0]
+        ):
+            return None
+        # The scalar sparse dispatch removes Python/array intermediates at small
+        # batch sizes, but sufficiently large dense products are faster as
+        # batched MLX matrix contractions. Channel-local kernels remain faster
+        # at large edge counts and are not subject to this crossover guard.
+        if (
+            getattr(self, "_metal_kernel_kind", None) == "scalar_paths"
+            and left_array.shape[0] > 512
+        ):
+            return None
+        if self.weight_numel > 0:
+            if weight is None or weight.dtype != mx.float32:
+                return None
+            if weight.ndim == 1:
+                if not self.shared_weights:
+                    return None
+            elif weight.ndim == 2:
+                if self.shared_weights or weight.shape[0] != left_array.shape[0]:
+                    return None
+            else:
+                return None
+            metal_weight = weight
+        else:
+            metal_weight = self._metal_dummy_weight
+        return self._metal_operation(left_array, right_array, metal_weight)
+
+    def _general_call_arrays(
+        self, left_array: Any, right_array: Any, weight: Any | None = None
+    ) -> Any:
         left = IrrepsArray(self.irreps_in1, left_array)
         right = IrrepsArray(self.irreps_in2, right_array)
         return _numerical_tensor_product(self._plan(weight is not None), left, right, weights=weight).array
+
+    def _call_arrays(self, left_array: Any, right_array: Any, weight: Any | None = None) -> Any:
+        metal = self._try_metal(left_array, right_array, weight)
+        if metal is not None:
+            return metal
+        return self._general_call_arrays(left_array, right_array, weight)
+
+    def differentiable_arrays(
+        self, left_array: Any, right_array: Any, weight: Any | None = None
+    ) -> Any:
+        """General MLX fallback for JVP and arbitrary transform nesting."""
+
+        return self._general_call_arrays(left_array, right_array, weight)
 
     def _get_weight(self, weight: Any | None) -> Any | None:
         if weight is None:
@@ -698,6 +866,15 @@ def _explicit_mul_repr(irreps: Irreps) -> str:
     return "+".join(f"{part.mul}x{part.ir}" for part in irreps)
 
 
+def _block_offsets_for_kernel(irreps: Irreps) -> tuple[int, ...]:
+    offsets = []
+    cursor = 0
+    for part in irreps:
+        offsets.append(cursor)
+        cursor += part.dim
+    return tuple(offsets)
+
+
 class FullyConnectedTensorProduct(TensorProduct):
     def __init__(
         self,
@@ -713,6 +890,7 @@ class FullyConnectedTensorProduct(TensorProduct):
         in2_var: list[float] | None = None,
         out_var: list[float] | None = None,
         compile_left_right: bool = True,
+        use_custom_kernel: bool = True,
     ) -> None:
         left = Irreps(irreps_in1).simplify()
         right = Irreps(irreps_in2).simplify()
@@ -737,6 +915,7 @@ class FullyConnectedTensorProduct(TensorProduct):
             internal_weights=internal_weights,
             shared_weights=shared_weights,
             compile_left_right=compile_left_right,
+            use_custom_kernel=use_custom_kernel,
         )
 
 
@@ -750,6 +929,7 @@ class ElementwiseTensorProduct(TensorProduct):
         irrep_normalization: str = "component",
         path_normalization: str = "element",
         compile_left_right: bool = True,
+        use_custom_kernel: bool = True,
     ) -> None:
         left = Irreps(irreps_in1).simplify()
         right = Irreps(irreps_in2).simplify()
@@ -775,6 +955,7 @@ class ElementwiseTensorProduct(TensorProduct):
             internal_weights=False,
             shared_weights=True,
             compile_left_right=compile_left_right,
+            use_custom_kernel=use_custom_kernel,
         )
 
 
@@ -788,6 +969,7 @@ class FullTensorProduct(TensorProduct):
         irrep_normalization: str = "component",
         path_normalization: str = "element",
         compile_left_right: bool = True,
+        use_custom_kernel: bool = True,
     ) -> None:
         left = Irreps(irreps_in1).simplify()
         right = Irreps(irreps_in2).simplify()
@@ -807,6 +989,7 @@ class FullTensorProduct(TensorProduct):
                     output_parts.append(MulIrrep(part1.mul * part2.mul, ir_out))
                     instructions.append((i1, i2, i_out, "uvuv", False))
         output = Irreps(output_parts)
+        self._execution_irreps_out = output
         super().__init__(
             left,
             right,
@@ -817,6 +1000,7 @@ class FullTensorProduct(TensorProduct):
             internal_weights=False,
             shared_weights=True,
             compile_left_right=compile_left_right,
+            use_custom_kernel=use_custom_kernel,
         )
         self._execution_irreps_out = self.irreps_out
         if filter_ir_out is None:
@@ -841,6 +1025,31 @@ class FullTensorProduct(TensorProduct):
             self._output_index_groups,
         )
         self._output_mask = mx.maximum(grouped_mask.array[0], 0.0)
+        execution_maps: dict[int, tuple[int, ...]] = {}
+        final_offsets = _block_offsets_for_kernel(self.irreps_out)
+        for final_index, execution_indices in enumerate(self._output_index_groups):
+            multiplicity_cursor = 0
+            final_part = self.irreps_out[final_index]
+            for execution_index in execution_indices:
+                execution_part = self._execution_irreps_out[execution_index]
+                execution_maps[execution_index] = tuple(
+                    final_offsets[final_index]
+                    + (multiplicity_cursor + mul) * final_part.ir.dim
+                    + component
+                    for mul in range(execution_part.mul)
+                    for component in range(final_part.ir.dim)
+                )
+                multiplicity_cursor += execution_part.mul
+        if self._full_instruction_groups is not None:
+            self._configure_metal(
+                output_irreps=self.irreps_out,
+                output_maps=tuple(
+                    execution_maps[instruction.output_index]
+                    for instruction in self.instructions
+                ),
+            )
+        else:
+            self._metal_operation = None
 
     def __repr__(self) -> str:
         path_count = sum(prod(ins.path_shape) for ins in self.instructions)
@@ -862,9 +1071,9 @@ class FullTensorProduct(TensorProduct):
             weight_slices=plan.weight_slices,
         )
 
-    def _call_arrays(self, left_array: Any, right_array: Any, weight: Any | None = None) -> Any:
+    def _general_call_arrays(self, left_array: Any, right_array: Any, weight: Any | None = None) -> Any:
         if self._full_instruction_groups is None:
-            return super()._call_arrays(left_array, right_array, weight)
+            return super()._general_call_arrays(left_array, right_array, weight)
         if weight is not None:
             raise ValueError("FullTensorProduct does not accept weights")
         if left_array.dtype != right_array.dtype:
@@ -945,6 +1154,12 @@ class FullTensorProduct(TensorProduct):
         if not grouped:
             return mx.zeros((*leading_shape, 0), dtype=left_array.dtype)
         return mx.concatenate(grouped, axis=-1)
+
+    def _call_arrays(self, left_array: Any, right_array: Any, weight: Any | None = None) -> Any:
+        metal = self._try_metal(left_array, right_array, weight)
+        if metal is not None:
+            return metal
+        return self._general_call_arrays(left_array, right_array, weight)
 
     def __call__(self, left: IrrepsArray, right: IrrepsArray, weight: Any | None = None) -> IrrepsArray:
         if left.irreps.simplify() != self.irreps_in1:

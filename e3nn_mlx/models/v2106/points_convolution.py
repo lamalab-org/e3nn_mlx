@@ -29,6 +29,8 @@ class Convolution(mlx_module_base()):
         irreps_node_output,
         fc_neurons,
         num_neighbors: float,
+        *,
+        use_custom_kernel: bool = True,
     ) -> None:
         super().__init__()
         if num_neighbors <= 0:
@@ -43,12 +45,19 @@ class Convolution(mlx_module_base()):
         if not self.fc_neurons or any(width <= 0 for width in self.fc_neurons):
             raise ValueError("fc_neurons must contain positive input and hidden widths")
         self.num_neighbors = float(num_neighbors)
+        self.use_custom_kernel = bool(use_custom_kernel)
 
         self.sc = FullyConnectedTensorProduct(
-            self.irreps_node_input, self.irreps_node_attr, self.irreps_node_output
+            self.irreps_node_input,
+            self.irreps_node_attr,
+            self.irreps_node_output,
+            use_custom_kernel=self.use_custom_kernel,
         )
         self.lin1 = FullyConnectedTensorProduct(
-            self.irreps_node_input, self.irreps_node_attr, self.irreps_node_input
+            self.irreps_node_input,
+            self.irreps_node_attr,
+            self.irreps_node_input,
+            use_custom_kernel=self.use_custom_kernel,
         )
 
         middle_parts = []
@@ -79,13 +88,20 @@ class Convolution(mlx_module_base()):
             remapped,
             internal_weights=False,
             shared_weights=False,
+            use_custom_kernel=self.use_custom_kernel,
         )
         self.fc = FullyConnectedNet([*self.fc_neurons, self.tp.weight_numel], _silu)
         self.lin2 = FullyConnectedTensorProduct(
-            self.irreps_mid, self.irreps_node_attr, self.irreps_node_output
+            self.irreps_mid,
+            self.irreps_node_attr,
+            self.irreps_node_output,
+            use_custom_kernel=self.use_custom_kernel,
         )
         self.alpha = FullyConnectedTensorProduct(
-            self.irreps_mid, self.irreps_node_attr, "0e"
+            self.irreps_mid,
+            self.irreps_node_attr,
+            "0e",
+            use_custom_kernel=self.use_custom_kernel,
         )
         mx, _ = require_mlx()
         if self.alpha.weight is None or not bool(mx.all(self.alpha.output_mask)):

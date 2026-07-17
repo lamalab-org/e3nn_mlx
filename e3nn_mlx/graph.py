@@ -5,7 +5,13 @@ from __future__ import annotations
 from .compat import require_mlx
 
 
-def scatter_sum(source, index, dim_size: int | None = None):
+def scatter_sum(
+    source,
+    index,
+    dim_size: int | None = None,
+    *,
+    use_custom_kernel: bool = False,
+):
     """Sum rows of ``source`` into output rows selected by one-dimensional ``index``."""
 
     mx, _ = require_mlx()
@@ -19,6 +25,15 @@ def scatter_sum(source, index, dim_size: int | None = None):
         dim_size = 0 if index.size == 0 else int(mx.max(index).item()) + 1
     if dim_size < 0:
         raise ValueError("dim_size must be non-negative")
+    if (
+        use_custom_kernel
+        and source.ndim >= 2
+        and source.dtype == mx.float32
+        and source.shape[0] > 0
+    ):
+        from ._metal_scatter import make_operation
+
+        return make_operation(index, dim_size, source.shape)(source)
     output = mx.zeros((dim_size, *source.shape[1:]), dtype=source.dtype)
     return output.at[index].add(source)
 
