@@ -83,3 +83,44 @@ JSON/CSV results, and dependency-free SVG/HTML plot generation are included.
 Generated Metal kernels and the reproducible kernel/general-MLX/Torch-CPU
 comparison are documented in
 [`evals/KERNEL_EVALUATION.md`](evals/KERNEL_EVALUATION.md).
+
+### JVP and generated-kernel boundary
+
+A Jacobian-vector product (JVP) propagates a chosen input perturbation through
+a function without constructing its complete Jacobian. Most users do not call
+JVP directly: ordinary inference and standard training—including MACE energy,
+force, and parameter-gradient training—use forward evaluation and reverse-mode
+gradients.
+
+JVP is useful for more specialized atomistic workflows, including:
+
+- Hessian-vector products and directional force-constant calculations;
+- phonon, vibrational-response, and stability algorithms that propagate a
+  displacement direction;
+- mixed position/parameter response calculations;
+- tangent dynamics, sensitivity analysis, and forward-mode Jacobian APIs;
+- debugging equivariance by differentiating along an infinitesimal rotation.
+
+MLX 0.31 cannot currently apply JVP directly to a `CustomKernel` primitive.
+For these workflows, select the fully differentiable MLX implementation:
+
+```python
+import e3nn_mlx
+
+# Spherical harmonics and graph reduction
+y = e3nn_mlx.spherical_harmonics(
+    degrees, vectors, use_custom_kernel=False
+)
+summed = e3nn_mlx.scatter_sum(
+    messages, edge_dst, num_nodes, use_custom_kernel=False
+)
+
+# TensorProduct: use this callable inside mx.jvp
+y = tensor_product.differentiable_arrays(left, right, weights)
+```
+
+This changes execution strategy, not mathematical conventions or accuracy.
+Reverse-mode gradients and reverse-over-reverse second derivatives remain
+supported by the generated kernels. See
+[`evals/KERNEL_EVALUATION.md`](evals/KERNEL_EVALUATION.md) for the performance
+and fallback details.

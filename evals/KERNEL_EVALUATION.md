@@ -30,6 +30,12 @@ which needs forward-mode transformation should therefore call tensor-product
 harmonics/scatter. This is an explicit runtime boundary, not a numerical
 approximation.
 
+Typical JVP users are phonon and vibrational-response calculations,
+Hessian-vector products, mixed position/parameter response, tangent dynamics,
+and developers differentiating along infinitesimal rotations to diagnose
+equivariance. Standard inference and reverse-mode energy/force training do not
+require a direct JVP. The root README contains concrete fallback examples.
+
 ## Three-way comparison
 
 Use `--mlx-kernels both` to launch independent generated-kernel and general-MLX
