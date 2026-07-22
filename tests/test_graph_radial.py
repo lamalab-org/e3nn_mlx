@@ -119,6 +119,26 @@ def test_scatter_sum_values_multidimensional_empty_compile_and_gradient() -> Non
     gradient = mx.grad(lambda x: mx.sum(e3nn.scatter_sum(x, index, 3) ** 2))(source)
     mx.eval(gradient)
     assert bool(mx.all(mx.isfinite(gradient)))
+    safe = e3nn.scatter_sum(source, index, 3, jvp_safe=True)
+    assert _max_abs(safe - expected) == 0.0
+    safe_gradient = mx.grad(
+        lambda x: mx.sum(e3nn.scatter_sum(x, index, 3, jvp_safe=True) ** 2)
+    )(source)
+    assert _max_abs(safe_gradient - gradient) == 0.0
+    (jvp_output,), (jvp_tangent,) = mx.jvp(
+        lambda x: e3nn.scatter_sum(x, index, 3, jvp_safe=True),
+        (source,),
+        (mx.ones_like(source),),
+    )
+    assert _max_abs(jvp_output - expected) == 0.0
+    assert _max_abs(
+        jvp_tangent
+        - e3nn.scatter_sum(mx.ones_like(source), index, 3, jvp_safe=True)
+    ) == 0.0
+    compiled_safe = mx.compile(
+        lambda x: e3nn.scatter_sum(x, index, 3, jvp_safe=True)
+    )
+    assert _max_abs(compiled_safe(source) - expected) == 0.0
     empty = e3nn.scatter_sum(mx.zeros((0, 4)), mx.zeros((0,), dtype=mx.int32), 2)
     assert empty.shape == (2, 4)
 
@@ -130,6 +150,21 @@ def test_scatter_sum_validation() -> None:
         e3nn.scatter_sum(mx.ones((2, 3)), mx.array([0], dtype=mx.int32), 1)
     with pytest.raises(TypeError, match="integer"):
         e3nn.scatter_sum(mx.ones((2, 3)), mx.array([0.0, 0.0]), 1)
+    with pytest.raises(ValueError, match="requires use_custom_kernel=False"):
+        e3nn.scatter_sum(
+            mx.ones((2, 3)),
+            mx.array([0, 0], dtype=mx.int32),
+            1,
+            use_custom_kernel=True,
+            jvp_safe=True,
+        )
+    with pytest.raises(ValueError, match="0 <= index < dim_size"):
+        e3nn.scatter_sum(
+            mx.ones((2, 3)),
+            mx.array([0, 2], dtype=mx.int32),
+            2,
+            jvp_safe=True,
+        )
 
 
 @pytest.mark.mlx

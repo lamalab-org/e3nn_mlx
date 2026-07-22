@@ -300,12 +300,12 @@ DOCUMENTED_SOURCE_CONTRACTS = (
     ),
     (
         "README.md",
-        "MLX 0.31's indexed-add primitive does not implement JVP",
+        "the scatter fallback requires eager, fixed indices",
         "tests/test_documentation_contract.py::test_documented_general_paths_support_jvp",
     ),
     (
         "docs/guide/performance.md",
-        "`scatter_sum` supports reverse-mode differentiation but has no forward-mode fallback",
+        "`scatter_sum(..., use_custom_kernel=False, jvp_safe=True)`",
         "tests/test_documentation_contract.py::test_documented_general_paths_support_jvp",
     ),
     (
@@ -626,14 +626,21 @@ def test_documented_general_paths_support_jvp() -> None:
 
     source = mx.arange(8, dtype=mx.float32).reshape(4, 2)
     index = mx.array([0, 1, 0, 1], dtype=mx.int32)
-    with pytest.raises(RuntimeError, match="JVP not yet implemented"):
-        mx.jvp(
-            lambda value: scatter_sum(
-                value, index, 2, use_custom_kernel=False
-            ),
-            (source,),
-            (mx.ones_like(source),),
-        )
+    (scattered,), (scatter_tangent,) = mx.jvp(
+        lambda value: scatter_sum(
+            value,
+            index,
+            2,
+            use_custom_kernel=False,
+            jvp_safe=True,
+        ),
+        (source,),
+        (mx.ones_like(source),),
+    )
+    expected_scatter = scatter_sum(source, index, 2)
+    expected_tangent = scatter_sum(mx.ones_like(source), index, 2)
+    assert _maximum_error(scattered, expected_scatter) == 0.0
+    assert _maximum_error(scatter_tangent, expected_tangent) == 0.0
 
     product = o3.FullTensorProduct("1o", "1o", use_custom_kernel=True)
     right = mx.array([[-0.5, 0.1, 0.7], [0.2, 0.4, -0.1]], dtype=mx.float32)
@@ -644,8 +651,9 @@ def test_documented_general_paths_support_jvp() -> None:
     )
     assert product_value.shape == product_tangent.shape
     assert product_value.shape == (2, product.irreps_out.dim)
-    mx.eval(harmonics_tangent, product_tangent)
+    mx.eval(harmonics_tangent, scatter_tangent, product_tangent)
     assert bool(mx.all(mx.isfinite(harmonics_tangent)))
+    assert bool(mx.all(mx.isfinite(scatter_tangent)))
     assert bool(mx.all(mx.isfinite(product_tangent)))
 
 
