@@ -243,11 +243,14 @@ def test_v2106_network_fixed_topology_compiles_and_reuses(kind) -> None:
             edges[1],
         )
     expected = forward(*args)
+    mx.eval(expected)
     compiled = mx.compile(forward)
     assert _max_abs(compiled(*args) - expected) < 2e-4
     changed = list(args)
     changed[1] = changed[1] * 0.9
-    assert _max_abs(compiled(*changed) - forward(*changed)) < 2e-4
+    changed_expected = forward(*changed)
+    mx.eval(changed_expected)
+    assert _max_abs(compiled(*changed) - changed_expected) < 2e-4
 
 
 @pytest.mark.mlx

@@ -105,10 +105,14 @@ def test_v2106_convolution_compilation_and_cached_reuse() -> None:
     module = _module()
     _activate_alpha(module)
     values = _inputs(module)
+    expected = module.forward_arrays(*values)
+    mx.eval(expected)
     compiled = mx.compile(module.forward_arrays)
-    assert _max_abs(compiled(*values) - module.forward_arrays(*values)) < 5e-5
+    assert _max_abs(compiled(*values) - expected) < 5e-5
     changed = (values[0] * 0.9, values[1], *values[2:])
-    assert _max_abs(compiled(*changed) - module.forward_arrays(*changed)) < 5e-5
+    changed_expected = module.forward_arrays(*changed)
+    mx.eval(changed_expected)
+    assert _max_abs(compiled(*changed) - changed_expected) < 5e-5
 
 
 @pytest.mark.mlx

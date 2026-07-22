@@ -150,13 +150,18 @@ def test_network_fixed_topology_compiles_and_reuses_compiled_graph() -> None:
         ).array
 
     expected = forward(data["pos"], data["x"], data["z"], batch, edges[0], edges[1])
+    mx.eval(expected)
     compiled = mx.compile(forward)
     actual = compiled(data["pos"], data["x"], data["z"], batch, edges[0], edges[1])
     assert _max_abs(actual - expected) < 8e-5
     changed_x = data["x"] * 0.8
+    changed_expected = forward(
+        data["pos"], changed_x, data["z"], batch, edges[0], edges[1]
+    )
+    mx.eval(changed_expected)
     assert _max_abs(
         compiled(data["pos"], changed_x, data["z"], batch, edges[0], edges[1])
-        - forward(data["pos"], changed_x, data["z"], batch, edges[0], edges[1])
+        - changed_expected
     ) < 8e-5
 
 
