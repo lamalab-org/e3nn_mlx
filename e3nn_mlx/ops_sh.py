@@ -8,8 +8,7 @@ from typing import Sequence
 from e3nn_core.cg import wigner_3j
 from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 
-from .compat import require_mlx
-from .compat import mlx_module_base
+from .compat import mlx_metal_available, mlx_module_base, require_mlx
 from .irreps_array import IrrepsArray
 from .ops_rotations import angles_to_xyz
 
@@ -121,6 +120,7 @@ def spherical_harmonics(
 
     if (
         use_custom_kernel
+        and mlx_metal_available()
         and raw_vectors.ndim == 2
         and raw_vectors.dtype == mx.float32
         and max(parsed_degrees) <= 4

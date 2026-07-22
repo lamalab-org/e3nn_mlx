@@ -111,6 +111,10 @@ def test_convolution_compiles_with_integer_topology_and_matches_eager() -> None:
     module = _convolution()
     values = _inputs(module)
     expected = module.forward_arrays(*values)
+    # Materialize the eager graph before compiling the same stateful module.
+    # Otherwise both lazy graphs can be evaluated together after compilation,
+    # producing a sporadic comparison of differently scheduled scatter sums.
+    mx.eval(expected)
     compiled = mx.compile(module.forward_arrays)
     actual = compiled(*values)
     assert _max_abs(actual - expected) < 4e-5
@@ -124,7 +128,9 @@ def test_convolution_compiles_with_integer_topology_and_matches_eager() -> None:
         values[4],
         values[5] - 0.1,
     )
-    assert _max_abs(compiled(*changed) - module.forward_arrays(*changed)) < 4e-5
+    changed_expected = module.forward_arrays(*changed)
+    mx.eval(changed_expected)
+    assert _max_abs(compiled(*changed) - changed_expected) < 4e-5
 
 
 @pytest.mark.mlx

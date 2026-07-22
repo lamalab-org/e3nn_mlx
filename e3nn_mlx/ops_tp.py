@@ -12,7 +12,7 @@ from e3nn_core.cg import clebsch_gordan
 from e3nn_core.instructions import TensorProductInstruction, generate_tensor_product_instructions, make_tensor_product_instructions
 from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 
-from .compat import mlx_module_base, require_mlx
+from .compat import mlx_metal_available, mlx_module_base, require_mlx
 from .irreps_array import IrrepsArray
 from ._metal_tp import (
     build_channel_metadata,
@@ -608,7 +608,11 @@ class TensorProduct(mlx_module_base()):
         output_irreps: Irreps | None = None,
         output_maps: tuple[tuple[int, ...], ...] | None = None,
     ) -> None:
-        if not self.use_custom_kernel or not self.instructions:
+        if (
+            not self.use_custom_kernel
+            or not self.instructions
+            or not mlx_metal_available()
+        ):
             self._metal_operation = None
             return
         weighted_flags = {instruction.has_weight for instruction in self.instructions}

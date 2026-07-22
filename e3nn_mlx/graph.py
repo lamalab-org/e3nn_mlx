@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .compat import require_mlx
+from .compat import mlx_metal_available, require_mlx
 
 
 def scatter_sum(
@@ -27,6 +27,7 @@ def scatter_sum(
         raise ValueError("dim_size must be non-negative")
     if (
         use_custom_kernel
+        and mlx_metal_available()
         and source.ndim >= 2
         and source.dtype == mx.float32
         and source.shape[0] > 0

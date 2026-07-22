@@ -6,6 +6,12 @@ import pytest
 
 from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx import scatter_sum, spherical_harmonics
+from e3nn_mlx.compat import mlx_metal_available
+
+
+pytestmark = pytest.mark.skipif(
+    not mlx_metal_available(), reason="generated kernels require the Metal backend"
+)
 
 
 def _maximum_error(first, second) -> float:
