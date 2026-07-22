@@ -4,25 +4,42 @@ on:
   push:
   pull_request:
 
-jobs:
-  core:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install -e '.[test]'
-      - run: python -m pytest -m 'not mlx'
+permissions:
+  contents: read
 
-  mlx:
-    runs-on: macos-14
+jobs:
+  tests:
+    name: Tests (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-14
+
+    runs-on: ${{ matrix.os }}
+
     env:
       E3NN_MLX_REQUIRE_RUNTIME: "1"
+
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: python -m pip install -e '.[mlx,test]'
-      - run: python -m pytest
+          cache: pip
+
+      - name: Upgrade packaging tools
+        run: python -m pip install --upgrade pip setuptools wheel
+
+      - name: Install package
+        run: python -m pip install -e ".[mlx,test]"
+
+      - name: Verify MLX runtime
+        run: |
+          python -c "import platform; print('platform:', platform.platform()); print('machine:', platform.machine())"
+          python -c "import mlx.core as mx; x = mx.arange(3); mx.eval(x); print('MLX:', x)"
+
+      - name: Run tests
+        run: python -m pytest
