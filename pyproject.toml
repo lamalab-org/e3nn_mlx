@@ -1,22 +1,53 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "e3nn-mlx"
-version = "0.1.0"
-description = "Backend-neutral e3nn core with an MLX-native backend"
+dynamic = ["version"]
+description = "Euclidean neural networks for MLX"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
-
-[project.optional-dependencies]
-mlx = [
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  {name = "Rostislav Fedorov"},
+]
+keywords = [
+  "equivariance",
+  "e3nn",
+  "machine-learning",
+  "mlx",
+  "molecular-modeling",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Science/Research",
+  "Operating System :: MacOS",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
   "mlx>=0.31,<0.33; sys_platform == 'darwin' and platform_machine == 'arm64'",
   "mlx[cpu]>=0.31,<0.33; sys_platform == 'linux'",
   "numpy>=2,<3",
 ]
 
+[project.urls]
+Homepage = "https://github.com/lamalab-org/e3nn_mlx"
+Changelog = "https://github.com/lamalab-org/e3nn_mlx/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/lamalab-org/e3nn_mlx/tree/main/docs"
+Issues = "https://github.com/lamalab-org/e3nn_mlx/issues"
+Repository = "https://github.com/lamalab-org/e3nn_mlx.git"
+
+[project.optional-dependencies]
 test = [
   "pytest>=9,<10",
   "numpy>=2.3,<3",
@@ -26,6 +57,12 @@ reference = [
   "e3nn==0.5.8",
   "numpy==2.3.1",
   "torch==2.7.1",
+]
+
+release = [
+  "build>=1.2,<2",
+  "check-wheel-contents>=0.6,<1",
+  "twine>=6,<7",
 ]
 
 [tool.pytest.ini_options]
@@ -39,5 +76,13 @@ markers = [
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.dynamic]
+version = {attr = "e3nn_mlx._version.__version__"}
+
 [tool.setuptools.packages.find]
 include = ["e3nn_core*", "e3nn_backend*", "e3nn_mlx*"]
+
+[tool.check-wheel-contents]
+# One distribution intentionally provides the neutral core, backend protocol,
+# and MLX runtime as three importable top-level packages.
+toplevel = ["e3nn_backend", "e3nn_core", "e3nn_mlx"]

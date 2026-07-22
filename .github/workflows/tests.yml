@@ -34,7 +34,7 @@ jobs:
         run: python -m pip install --upgrade pip setuptools wheel
 
       - name: Install package
-        run: python -m pip install -e ".[mlx,test]"
+        run: python -m pip install -e ".[test]"
 
       - name: Verify MLX runtime
         run: |
@@ -43,3 +43,36 @@ jobs:
 
       - name: Run tests
         run: python -m pytest
+
+  package:
+    name: Package distributions
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install packaging tools
+        run: python -m pip install build check-wheel-contents twine
+
+      - name: Build distributions
+        run: python -m build
+
+      - name: Validate distributions
+        run: |
+          python -m twine check dist/*
+          check-wheel-contents dist/*.whl
+
+      - name: Verify clean wheel installation
+        run: |
+          wheel=$(realpath dist/*.whl)
+          expected=$(python -c "from e3nn_mlx._version import __version__; print(__version__)")
+          python -m venv /tmp/e3nn-mlx-wheel
+          /tmp/e3nn-mlx-wheel/bin/python -m pip install --no-deps "$wheel"
+          cd /tmp
+          actual=$(/tmp/e3nn-mlx-wheel/bin/python -c "import e3nn_mlx; print(e3nn_mlx.__version__)")
+          test "$actual" = "$expected"

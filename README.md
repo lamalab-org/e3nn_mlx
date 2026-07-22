@@ -16,8 +16,20 @@ The P0 implementation currently provides:
 
 P0 guarantees numerical compatibility through `l=6`; reference and structural
 tests exercise selected operations through `l=8`.  See
-[`docs/P0_COMPATIBILITY.md`](docs/P0_COMPATIBILITY.md) for conventions, shapes,
+[`docs/P0_COMPATIBILITY.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/docs/P0_COMPATIBILITY.md) for conventions, shapes,
 normalization, and the release gate.
+
+## Installation
+
+Install the published package with:
+
+```bash
+python -m pip install e3nn-mlx
+```
+
+Python 3.11 or newer is required. Apple Silicon uses MLX's Metal backend;
+Linux installs the MLX CPU backend. Generated Metal kernels automatically fall
+back to general MLX operations when Metal is unavailable.
 
 ## e3nn-style API
 
@@ -37,15 +49,15 @@ y = linear(x)
 `e3nn_mlx.nn.models.v2106` mirror the implemented PyTorch/e3nn organization.
 Raw inputs return raw MLX arrays; `IrrepsArray` inputs preserve typed outputs.
 The original flat API remains backward-compatible. See
-[`docs/HIGH_LEVEL_API.md`](docs/HIGH_LEVEL_API.md) for migration examples,
+[`docs/HIGH_LEVEL_API.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/docs/HIGH_LEVEL_API.md) for migration examples,
 model imports, compilation, deliberate differences, and no-overhead evidence.
 
 ## Development
 
-Install the MLX and test extras and run the suite on Apple Silicon:
+Install the test dependencies and run the suite on Apple Silicon:
 
 ```bash
-python -m pip install -e '.[mlx,test]'
+python -m pip install -e '.[test]'
 python -m pytest
 ```
 
@@ -69,12 +81,12 @@ The complete modular June 2021 family is available from
 `e3nn_mlx.models.v2106`. It includes `Convolution`, `MessagePassing`,
 `SimpleNetwork`, and `NetworkForAGraphWithAttributes`; both networks support
 eager dictionary input and compiled fixed-edge execution. See
-[`docs/V2106_POINT_MODELS.md`](docs/V2106_POINT_MODELS.md) for their APIs,
+[`docs/V2106_POINT_MODELS.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/docs/V2106_POINT_MODELS.md) for their APIs,
 compilation boundary, upstream semantics, and verification coverage.
 
 ## Performance evaluation
 
-The isolated cross-framework harness in [`evals/`](evals/README.md) compares
+The isolated cross-framework harness in [`evals/`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/README.md) compares
 MLX eager/compiled execution with upstream PyTorch/e3nn on Apple Silicon. It
 covers spherical harmonics, tensor products, Linear, v2106 convolution,
 message passing, and an end-to-end attributed network in forward and training
@@ -82,7 +94,7 @@ modes. Small smoke presets, larger scaling experiments, synchronized timing,
 JSON/CSV results, and dependency-free SVG/HTML plot generation are included.
 Generated Metal kernels and the reproducible kernel/general-MLX/Torch-CPU
 comparison are documented in
-[`evals/KERNEL_EVALUATION.md`](evals/KERNEL_EVALUATION.md).
+[`evals/KERNEL_EVALUATION.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/KERNEL_EVALUATION.md).
 
 ### JVP and generated-kernel boundary
 
@@ -122,5 +134,5 @@ y = tensor_product.differentiable_arrays(left, right, weights)
 This changes execution strategy, not mathematical conventions or accuracy.
 Reverse-mode gradients and reverse-over-reverse second derivatives remain
 supported by the generated kernels. See
-[`evals/KERNEL_EVALUATION.md`](evals/KERNEL_EVALUATION.md) for the performance
+[`evals/KERNEL_EVALUATION.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/KERNEL_EVALUATION.md) for the performance
 and fallback details.

@@ -1,5 +1,7 @@
 """MLX-native e3nn runtime."""
 
+from ._version import __version__
+
 from e3nn_core import (
     Irrep,
     Irreps,
@@ -87,6 +89,7 @@ from . import math, nn, o3
 wigner_D = wigner_d
 
 __all__ = [
+    "__version__",
     "ElementwiseTensorProduct",
     "Activation",
     "BatchNorm",
