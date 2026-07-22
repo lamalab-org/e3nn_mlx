@@ -122,6 +122,7 @@ def spherical_harmonics(
         use_custom_kernel
         and mlx_metal_available()
         and raw_vectors.ndim == 2
+        and raw_vectors.shape[0] > 0
         and raw_vectors.dtype == mx.float32
         and max(parsed_degrees) <= 4
     ):

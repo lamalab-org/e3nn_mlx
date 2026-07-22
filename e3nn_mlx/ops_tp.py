@@ -628,11 +628,12 @@ class TensorProduct(mlx_module_base()):
                 strict=True,
             )
         }
-        general = lambda first, second, value: self._general_call_arrays(
-            first,
-            second,
-            value if self.weight_numel > 0 else None,
-        )
+        def general(first, second, value):
+            return self._general_call_arrays(
+                first,
+                second,
+                value if self.weight_numel > 0 else None,
+            )
         if output_maps is None:
             channel_metadata = build_channel_metadata(
                 plan.irreps_in1,

@@ -25,13 +25,25 @@ def scatter_sum(
         dim_size = 0 if index.size == 0 else int(mx.max(index).item()) + 1
     if dim_size < 0:
         raise ValueError("dim_size must be non-negative")
-    if (
+    use_metal = (
         use_custom_kernel
         and mlx_metal_available()
         and source.ndim >= 2
         and source.dtype == mx.float32
         and source.shape[0] > 0
-    ):
+    )
+    if use_metal:
+        try:
+            minimum = int(mx.min(index).item())
+            maximum = int(mx.max(index).item())
+        except ValueError:
+            # Dynamic indices cannot be inspected while tracing a transform;
+            # retain the transformable general MLX scatter in that case.
+            use_metal = False
+        else:
+            if minimum < 0 or maximum >= dim_size:
+                raise ValueError("index values must satisfy 0 <= index < dim_size")
+    if use_metal:
         from ._metal_scatter import make_operation
 
         return make_operation(index, dim_size, source.shape)(source)

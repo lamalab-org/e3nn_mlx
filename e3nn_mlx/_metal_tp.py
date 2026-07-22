@@ -680,7 +680,7 @@ def make_operation(
         )
         if metadata.weighted:
             return outputs[0], outputs[1], outputs[2]
-        return outputs[0], outputs[1]
+        return outputs[0], outputs[1], mx.zeros_like(weight)
 
     @differentiable_backward.vjp
     def differentiable_backward_vjp(primals, cotangents, _outputs):
@@ -724,9 +724,7 @@ def make_operation(
     def operation_vjp(primals, cotangent, _output):
         left, right, weight = primals
         gradients = differentiable_backward(left, right, cotangent, weight)
-        if metadata.weighted:
-            return gradients
-        return gradients[0], gradients[1], mx.zeros_like(weight)
+        return gradients
 
     @operation.jvp
     def operation_jvp(primals, tangents):
