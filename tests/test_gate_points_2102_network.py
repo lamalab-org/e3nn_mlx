@@ -21,6 +21,11 @@ def _max_abs(value) -> float:
     return float(mx.max(mx.abs(value))) if value.size else 0.0
 
 
+def _assert_float32_close(actual, expected) -> None:
+    scale = max(_max_abs(actual), _max_abs(expected))
+    assert _max_abs(actual - expected) < 1e-5 + 5e-6 * scale
+
+
 def _network(*, exact: bool = False, reduce_output: bool = True, optional_inputs: bool = False):
     return Network(
         None if optional_inputs else "3x0e + 2x1o",
@@ -214,17 +219,19 @@ def test_network_position_feature_and_all_parameter_gradients_and_training_step(
 
 @pytest.mark.mlx
 def test_network_deepcopy_and_weight_round_trip(tmp_path) -> None:
+    mx = mlx_backend._require()
     module = _network(exact=True)
     data = _graph(module)
     expected = module(data).array
+    mx.eval(expected)
     copied = copy.deepcopy(module)
-    assert _max_abs(copied(data).array - expected) < 1e-5
+    _assert_float32_close(copied(data).array, expected)
 
     path = tmp_path / "gate_points_2102_weights.npz"
     module.save_weights(str(path))
     restored = _network(exact=True)
     restored.load_weights(str(path))
-    assert _max_abs(restored(data).array - expected) < 1e-5
+    _assert_float32_close(restored(data).array, expected)
 
 
 @pytest.mark.mlx

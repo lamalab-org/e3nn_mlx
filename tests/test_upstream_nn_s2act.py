@@ -23,7 +23,11 @@ def _max_abs(value) -> float:
 @pytest.mark.mlx
 @pytest.mark.parametrize(
     "act,normalization,p_val,p_arg",
-    itertools.product(["tanh", "square"], ["norm", "component"], [-1, 1], [-1, 1]),
+    list(
+        itertools.product(
+            ["tanh", "square"], ["norm", "component"], [-1, 1], [-1, 1]
+        )
+    ),
 )
 def test_upstream_s2_activation_equivariance(
     act: str, normalization: str, p_val: int, p_arg: int

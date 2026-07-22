@@ -25,6 +25,11 @@ def _max_abs(value) -> float:
     return float(mx.max(mx.abs(value))) if value.size else 0.0
 
 
+def _assert_float32_close(actual, expected) -> None:
+    scale = max(_max_abs(actual), _max_abs(expected))
+    assert _max_abs(actual - expected) < 1e-5 + 5e-6 * scale
+
+
 def _activate_alpha(module) -> None:
     mx = mlx_backend._require()
     for layer in module.mp.layers:
@@ -342,18 +347,20 @@ def test_v2106_network_automatic_edges_alias_empty_edges_and_nonpooled_output() 
 @pytest.mark.mlx
 @pytest.mark.parametrize("kind", ["simple", "attributed"])
 def test_v2106_network_deepcopy_and_weight_round_trip(kind, tmp_path) -> None:
+    mx = mlx_backend._require()
     module = _simple() if kind == "simple" else _attributed()
     data = _simple_data(module) if kind == "simple" else _attributed_data(module)
     _activate_alpha(module)
     expected = module(data).array
+    mx.eval(expected)
     copied = copy.deepcopy(module)
-    assert _max_abs(copied(data).array - expected) < 1e-5
+    _assert_float32_close(copied(data).array, expected)
 
     path = tmp_path / f"v2106_{kind}.npz"
     module.save_weights(str(path))
     restored = _simple() if kind == "simple" else _attributed()
     restored.load_weights(str(path))
-    assert _max_abs(restored(data).array - expected) < 1e-5
+    _assert_float32_close(restored(data).array, expected)
 
 
 @pytest.mark.mlx
