@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+tree_flatten = pytest.importorskip("mlx.utils").tree_flatten
+
 import e3nn_mlx as e3nn
 from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx.nn_gate import _Sortcut
-from mlx.utils import tree_flatten
 
 
 def _array(irreps, values):

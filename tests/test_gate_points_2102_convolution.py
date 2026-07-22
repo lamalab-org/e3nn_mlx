@@ -5,7 +5,8 @@ from __future__ import annotations
 from math import pi, sin
 
 import pytest
-from mlx.utils import tree_flatten
+
+tree_flatten = pytest.importorskip("mlx.utils").tree_flatten
 
 import e3nn_mlx as e3nn
 from e3nn_mlx.backend import mlx_backend

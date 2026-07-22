@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 
 import pytest
-from mlx.utils import tree_flatten, tree_map
+
+mlx_utils = pytest.importorskip("mlx.utils")
+tree_flatten = mlx_utils.tree_flatten
+tree_map = mlx_utils.tree_map
 
 import e3nn_mlx as e3nn
 from e3nn_mlx.backend import mlx_backend
