@@ -40,6 +40,11 @@ harmonics = o3.spherical_harmonics(
 )
 ```
 
+Scatter is a separate boundary: MLX 0.31's indexed-add primitive does not
+implement JVP, so `scatter_sum` supports reverse-mode differentiation but has
+no forward-mode fallback. Compute a message JVP before aggregation or use a
+problem-specific fixed incidence matrix when the reduction itself needs JVP.
+
 See the repository's
 [kernel evaluation guide](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/KERNEL_EVALUATION.md)
 for reproducible comparisons and the exact fallback contract.

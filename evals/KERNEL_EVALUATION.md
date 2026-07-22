@@ -27,8 +27,9 @@ derivatives. MLX 0.31 cannot currently apply JVP directly to a `CustomKernel`
 primitive even when its containing custom function supplies a JVP rule. Code
 which needs forward-mode transformation should therefore call tensor-product
 `differentiable_arrays`, or pass `use_custom_kernel=False` to spherical
-harmonics/scatter. This is an explicit runtime boundary, not a numerical
-approximation.
+harmonics. MLX's indexed-add primitive also lacks JVP, so scatter has no general
+forward-mode fallback in MLX 0.31. This is an explicit runtime boundary, not a
+numerical approximation.
 
 Typical JVP users are phonon and vibrational-response calculations,
 Hessian-vector products, mixed position/parameter response, tangent dynamics,

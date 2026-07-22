@@ -74,6 +74,7 @@ docs = [
 
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
+testpaths = ["tests"]
 markers = [
   "mlx: requires a working MLX runtime",
   "metal: requires the MLX Metal backend on Apple Silicon",

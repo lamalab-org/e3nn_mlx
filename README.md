@@ -114,22 +114,25 @@ JVP is useful for more specialized atomistic workflows, including:
 - debugging equivariance by differentiating along an infinitesimal rotation.
 
 MLX 0.31 cannot currently apply JVP directly to a `CustomKernel` primitive.
-For these workflows, select the fully differentiable MLX implementation:
+For spherical harmonics and tensor products, select the fully differentiable
+MLX implementation:
 
 ```python
 import e3nn_mlx
 
-# Spherical harmonics and graph reduction
+# Spherical harmonics
 y = e3nn_mlx.spherical_harmonics(
     degrees, vectors, use_custom_kernel=False
-)
-summed = e3nn_mlx.scatter_sum(
-    messages, edge_dst, num_nodes, use_custom_kernel=False
 )
 
 # TensorProduct: use this callable inside mx.jvp
 y = tensor_product.differentiable_arrays(left, right, weights)
 ```
+
+MLX 0.31's indexed-add primitive does not implement JVP, so neither scatter
+execution path is a forward-mode fallback. `scatter_sum` supports ordinary
+reverse-mode gradients; compute a message JVP before aggregation or use a
+problem-specific fixed incidence matrix when a graph-reduction JVP is required.
 
 This changes execution strategy, not mathematical conventions or accuracy.
 Reverse-mode gradients and reverse-over-reverse second derivatives remain
