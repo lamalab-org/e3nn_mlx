@@ -19,6 +19,10 @@ from evals.common import load_documents
 
 
 COLORS = {
+    "mlx-kernel-compiled": "#3f3fb5",
+    "mlx-kernel-eager": "#6666d6",
+    "mlx-no-kernel-compiled": "#2780a8",
+    "mlx-no-kernel-eager": "#65a9c7",
     "mlx-compiled": "#5b5bd6",
     "mlx-eager": "#8b8be8",
     "torch-compiled": "#d95f42",
@@ -204,7 +208,14 @@ def speedup_entries(rows, phase: str):
         ]
         for torch_label in torch_labels:
             torch_row = group[torch_label]
-            for mlx_label in ("mlx-eager", "mlx-compiled"):
+            for mlx_label in (
+                "mlx-kernel-eager",
+                "mlx-kernel-compiled",
+                "mlx-no-kernel-eager",
+                "mlx-no-kernel-compiled",
+                "mlx-eager",
+                "mlx-compiled",
+            ):
                 mlx_row = group.get(mlx_label)
                 if mlx_row is None:
                     continue
@@ -217,6 +228,36 @@ def speedup_entries(rows, phase: str):
                         "speedup" if ratio >= 1.0 else "slowdown",
                     )
                 )
+    return entries
+
+
+def kernel_speedup_entries(rows, phase: str):
+    """General-MLX latency divided by generated-kernel latency."""
+
+    successful = [
+        row for row in aggregate_rows(rows) if row.get("phase") == phase
+    ]
+    groups = {}
+    for row in successful:
+        config = json.dumps(row.get("config", {}), sort_keys=True)
+        groups.setdefault(
+            (row.get("preset"), row["case"], row["execution"], config), {}
+        )[row["backend"]] = row
+    entries = []
+    for (preset, case, execution, config_json), group in sorted(groups.items()):
+        kernel = group.get("mlx-kernel")
+        general = group.get("mlx-no-kernel")
+        if kernel is None or general is None:
+            continue
+        ratio = float(general["median_ms"]) / float(kernel["median_ms"])
+        entries.append(
+            (
+                f"{case} [{preset}; {_config_label(json.loads(config_json))}] "
+                f"· {execution}",
+                ratio,
+                "speedup" if ratio >= 1.0 else "slowdown",
+            )
+        )
     return entries
 
 
@@ -445,6 +486,19 @@ def main(argv=None) -> int:
             reference=1.0,
         )
         generated.append(speedup_name)
+        kernel_name = f"kernel_speedup_{phase}.svg"
+        horizontal_bars(
+            args.output_dir / kernel_name,
+            title=f"Generated-kernel {phase} speed relative to general MLX",
+            subtitle=(
+                "Ratio = general MLX median / generated-kernel median; "
+                "above 1× favors the kernel."
+            ),
+            entries=kernel_speedup_entries(rows, phase),
+            unit="x",
+            reference=1.0,
+        )
+        generated.append(kernel_name)
     horizontal_bars(
         args.output_dir / "compile_cost.svg",
         title="Cold compilation cost",

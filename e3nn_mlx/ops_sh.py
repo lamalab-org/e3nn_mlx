@@ -8,8 +8,7 @@ from typing import Sequence
 from e3nn_core.cg import wigner_3j
 from e3nn_core.irreps import Irrep, Irreps, MulIrrep
 
-from .compat import require_mlx
-from .compat import mlx_module_base
+from .compat import mlx_metal_available, mlx_module_base, require_mlx
 from .irreps_array import IrrepsArray
 from .ops_rotations import angles_to_xyz
 
@@ -71,12 +70,24 @@ def _scale_for_normalization(l: int, normalization: str) -> float:
     raise ValueError("normalization must be 'component', 'norm', or 'integral'")
 
 
+def _spherical_harmonics_array(parsed_degrees, raw_vectors, normalize, normalization):
+    mx, _ = require_mlx()
+    normalized_vectors = _normalized_vectors(raw_vectors, normalize)
+    all_harmonics = _component_harmonics(max(parsed_degrees), normalized_vectors)
+    selected = [
+        all_harmonics[l] * _scale_for_normalization(l, normalization)
+        for l in parsed_degrees
+    ]
+    return mx.concatenate(selected, axis=-1).astype(raw_vectors.dtype)
+
+
 def spherical_harmonics(
     degrees: int | Sequence[int] | Irreps | str,
     vectors,
     *,
     normalize: bool = True,
     normalization: str = "component",
+    use_custom_kernel: bool = True,
 ):
     """Evaluate real spherical harmonics in the canonical e3nn basis.
 
@@ -102,15 +113,47 @@ def spherical_harmonics(
         result = mx.zeros((*raw_vectors.shape[:-1], 0), dtype=raw_vectors.dtype)
         return IrrepsArray(irreps_out, result) if wrapped else result
 
-    normalized_vectors = _normalized_vectors(raw_vectors, normalize)
-    all_harmonics = _component_harmonics(max(parsed_degrees), normalized_vectors)
-    selected = [all_harmonics[l] * _scale_for_normalization(l, normalization) for l in parsed_degrees]
-    result = mx.concatenate(selected, axis=-1).astype(raw_vectors.dtype)
+    def general(array):
+        return _spherical_harmonics_array(
+            parsed_degrees, array, normalize, normalization
+        )
+
+    if (
+        use_custom_kernel
+        and mlx_metal_available()
+        and raw_vectors.ndim == 2
+        and raw_vectors.shape[0] > 0
+        and raw_vectors.dtype == mx.float32
+        and max(parsed_degrees) <= 4
+    ):
+        from ._metal_sh import make_operation
+
+        result = make_operation(
+            parsed_degrees,
+            normalize,
+            [_scale_for_normalization(l, normalization) for l in parsed_degrees],
+            general,
+        )(raw_vectors)
+    else:
+        result = general(raw_vectors)
     return IrrepsArray(irreps_out, result) if wrapped else result
 
 
-def sh(degrees, vectors, *, normalize: bool = True, normalization: str = "component"):
-    return spherical_harmonics(degrees, vectors, normalize=normalize, normalization=normalization)
+def sh(
+    degrees,
+    vectors,
+    *,
+    normalize: bool = True,
+    normalization: str = "component",
+    use_custom_kernel: bool = True,
+):
+    return spherical_harmonics(
+        degrees,
+        vectors,
+        normalize=normalize,
+        normalization=normalization,
+        use_custom_kernel=use_custom_kernel,
+    )
 
 
 def spherical_harmonics_alpha_beta(degrees, alpha, beta, *, normalization: str = "integral"):
@@ -134,6 +177,7 @@ class SphericalHarmonics(mlx_module_base()):
         normalization: str = "component",
         *,
         irreps_in: Irreps | str = "1o",
+        use_custom_kernel: bool = True,
     ) -> None:
         super().__init__()
         irreps_in = Irreps(irreps_in).remove_zero_multiplicities()
@@ -144,6 +188,7 @@ class SphericalHarmonics(mlx_module_base()):
         self.normalize = bool(normalize)
         _scale_for_normalization(0, normalization)
         self.normalization = normalization
+        self.use_custom_kernel = bool(use_custom_kernel)
         self._degrees = tuple(part.ir.l for part in self.irreps_out for _ in range(part.mul))
 
     def __call__(self, vectors):
@@ -155,12 +200,14 @@ class SphericalHarmonics(mlx_module_base()):
                 vectors,
                 normalize=self.normalize,
                 normalization=self.normalization,
+                use_custom_kernel=self.use_custom_kernel,
             )
         return spherical_harmonics(
             self._degrees,
             vectors,
             normalize=self.normalize,
             normalization=self.normalization,
+            use_custom_kernel=self.use_custom_kernel,
         )
 
 

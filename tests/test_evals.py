@@ -86,6 +86,8 @@ def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
         "latency_train.svg",
         "speedup_forward.svg",
         "speedup_train.svg",
+        "kernel_speedup_forward.svg",
+        "kernel_speedup_train.svg",
         "compile_cost.svg",
         "peak_memory.svg",
         "summary.csv",
@@ -119,15 +121,27 @@ def test_torch_both_expands_to_isolated_mps_and_cpu_workers(tmp_path) -> None:
             "both",
             "--torch-device",
             "both",
+            "--mlx-kernels",
+            "both",
             "--torch-python",
             str(tmp_path / "torch-python"),
         ]
     )
     assert selected_workers(args) == [
-        ("mlx", None),
-        ("torch", "mps"),
-        ("torch", "cpu"),
+        ("mlx", None, "on"),
+        ("mlx", None, "off"),
+        ("torch", "mps", None),
+        ("torch", "cpu", None),
     ]
+    for mode in ("on", "off"):
+        mlx_command = worker_command(
+            "mlx",
+            args.mlx_python,
+            tmp_path / f"mlx-{mode}.json",
+            args,
+            mlx_kernels=mode,
+        )
+        assert mlx_command[mlx_command.index("--mlx-kernels") + 1] == mode
     command = worker_command(
         "torch",
         args.torch_python,

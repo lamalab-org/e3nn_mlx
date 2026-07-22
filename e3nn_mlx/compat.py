@@ -29,6 +29,24 @@ def mlx_runtime_available() -> bool:
 
 
 @functools.lru_cache(maxsize=1)
+def mlx_metal_available() -> bool:
+    """Return whether this interpreter can execute MLX Metal kernels.
+
+    MLX also runs on CPU-only platforms, where ``mx.fast.metal_kernel`` can be
+    constructed but fails when evaluated. Keep the capability check separate
+    from :func:`mlx_runtime_available`, which intentionally accepts CPU MLX.
+    """
+
+    if sys.platform != "darwin" or not mlx_runtime_available():
+        return False
+    mx, _ = require_mlx()
+    try:
+        return bool(mx.is_available(mx.gpu))
+    except (AttributeError, RuntimeError, ValueError):
+        return False
+
+
+@functools.lru_cache(maxsize=1)
 def mlx_module_base() -> type:
     """Return ``mlx.nn.Module`` without making import-only environments crash."""
 

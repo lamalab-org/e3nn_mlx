@@ -139,6 +139,12 @@ def parse_args(argv=None):
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--device", choices=("auto", "mps", "cpu"), default="auto")
     parser.add_argument("--torch-compile", action="store_true")
+    parser.add_argument(
+        "--mlx-kernels",
+        choices=("on", "off"),
+        default="on",
+        help="Enable generated e3nn Metal kernels in the MLX worker",
+    )
     parser.add_argument("--fail-on-error", action="store_true")
     parser.add_argument("--list-cases", action="store_true")
     return parser.parse_args(argv)
@@ -166,6 +172,7 @@ def main(argv=None) -> int:
 
         from evals import mlx_cases as implementation
 
+        implementation.configure(use_custom_kernels=args.mlx_kernels == "on")
         mx.random.seed(0)
         device = str(mx.default_device())
     else:
@@ -176,7 +183,11 @@ def main(argv=None) -> int:
         )
         device = implementation.backend_metadata()["device"]
 
-    result_backend = f"torch-{device}" if args.backend == "torch" else args.backend
+    result_backend = (
+        f"torch-{device}"
+        if args.backend == "torch"
+        else ("mlx-kernel" if args.mlx_kernels == "on" else "mlx-no-kernel")
+    )
     metadata = new_run_metadata(args.preset, result_backend, device)
     metadata["backend_details"] = implementation.backend_metadata()
     metadata["timing"] = {
@@ -185,6 +196,8 @@ def main(argv=None) -> int:
         "inner_repeats": repeats,
     }
     metadata["overrides"] = args.overrides
+    if args.backend == "mlx":
+        metadata["custom_kernels"] = args.mlx_kernels == "on"
     results = []
     for name, config in workloads.items():
         print(f"[{result_backend}] constructing {name}", flush=True)

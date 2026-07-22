@@ -5,7 +5,10 @@ from __future__ import annotations
 import copy
 
 import pytest
-from mlx.utils import tree_flatten, tree_map
+
+mlx_utils = pytest.importorskip("mlx.utils")
+tree_flatten = mlx_utils.tree_flatten
+tree_map = mlx_utils.tree_map
 
 import e3nn_mlx as e3nn
 from e3nn_mlx.backend import mlx_backend
@@ -16,6 +19,11 @@ from e3nn_mlx.models.gate_points_2102 import Network
 def _max_abs(value) -> float:
     mx = mlx_backend._require()
     return float(mx.max(mx.abs(value))) if value.size else 0.0
+
+
+def _assert_float32_close(actual, expected) -> None:
+    scale = max(_max_abs(actual), _max_abs(expected))
+    assert _max_abs(actual - expected) < 1e-5 + 5e-6 * scale
 
 
 def _network(*, exact: bool = False, reduce_output: bool = True, optional_inputs: bool = False):
@@ -150,13 +158,18 @@ def test_network_fixed_topology_compiles_and_reuses_compiled_graph() -> None:
         ).array
 
     expected = forward(data["pos"], data["x"], data["z"], batch, edges[0], edges[1])
+    mx.eval(expected)
     compiled = mx.compile(forward)
     actual = compiled(data["pos"], data["x"], data["z"], batch, edges[0], edges[1])
     assert _max_abs(actual - expected) < 8e-5
     changed_x = data["x"] * 0.8
+    changed_expected = forward(
+        data["pos"], changed_x, data["z"], batch, edges[0], edges[1]
+    )
+    mx.eval(changed_expected)
     assert _max_abs(
         compiled(data["pos"], changed_x, data["z"], batch, edges[0], edges[1])
-        - forward(data["pos"], changed_x, data["z"], batch, edges[0], edges[1])
+        - changed_expected
     ) < 8e-5
 
 
@@ -206,17 +219,19 @@ def test_network_position_feature_and_all_parameter_gradients_and_training_step(
 
 @pytest.mark.mlx
 def test_network_deepcopy_and_weight_round_trip(tmp_path) -> None:
+    mx = mlx_backend._require()
     module = _network(exact=True)
     data = _graph(module)
     expected = module(data).array
+    mx.eval(expected)
     copied = copy.deepcopy(module)
-    assert _max_abs(copied(data).array - expected) < 1e-5
+    _assert_float32_close(copied(data).array, expected)
 
     path = tmp_path / "gate_points_2102_weights.npz"
     module.save_weights(str(path))
     restored = _network(exact=True)
     restored.load_weights(str(path))
-    assert _max_abs(restored(data).array - expected) < 1e-5
+    _assert_float32_close(restored(data).array, expected)
 
 
 @pytest.mark.mlx

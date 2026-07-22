@@ -67,10 +67,16 @@ class Convolution(mlx_module_base()):
         self.num_neighbors = float(num_neighbors)
 
         self.sc = FullyConnectedTensorProduct(
-            self.irreps_in, self.irreps_node_attr, self.irreps_out
+            self.irreps_in,
+            self.irreps_node_attr,
+            self.irreps_out,
+            use_custom_kernel=False,
         )
         self.lin1 = FullyConnectedTensorProduct(
-            self.irreps_in, self.irreps_node_attr, self.irreps_in
+            self.irreps_in,
+            self.irreps_node_attr,
+            self.irreps_in,
+            use_custom_kernel=False,
         )
 
         middle_parts = []
@@ -102,13 +108,17 @@ class Convolution(mlx_module_base()):
             remapped,
             internal_weights=False,
             shared_weights=False,
+            use_custom_kernel=False,
         )
         widths = [self.number_of_edge_features]
         widths.extend([int(radial_neurons)] * int(radial_layers))
         widths.append(self.tp.weight_numel)
         self.fc = FullyConnectedNet(widths, _silu)
         self.lin2 = FullyConnectedTensorProduct(
-            self.irreps_mid, self.irreps_node_attr, self.irreps_out
+            self.irreps_mid,
+            self.irreps_node_attr,
+            self.irreps_out,
+            use_custom_kernel=False,
         )
 
     def __repr__(self) -> str:
@@ -371,6 +381,10 @@ class Network(mlx_module_base()):
             edge_vectors,
             normalize=True,
             normalization="component",
+            # Keep the fully transformable recurrence inside end-to-end model
+            # graphs; the generated SH kernel is benchmarked/selected at the
+            # operator boundary and currently has a CustomKernel JVP limit.
+            use_custom_kernel=False,
         )
         edge_lengths = mx.sqrt(mx.sum(edge_vectors * edge_vectors, axis=-1))
         radial = soft_one_hot_linspace(

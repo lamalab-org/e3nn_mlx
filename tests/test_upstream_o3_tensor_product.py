@@ -239,6 +239,12 @@ def test_upstream_tensor_product_weight_views_copy_and_save_load() -> None:
     assert _max_abs(product(left, right, zeros).array) == 0.0
 
     duplicate = copy.deepcopy(product)
+    # MLX module state and ordinary Python attributes are intentionally stored
+    # in disjoint mappings. Runtime kernels/compiled closures are rebuilt or
+    # bypassed rather than copied across module instances.
+    assert not set(product).intersection(vars(product))
+    assert duplicate._metal_operation is None
+    assert duplicate._compiled.__self__ is duplicate
     assert _max_abs(product(left, right).array - duplicate(left, right).array) < 2e-6
 
     with tempfile.NamedTemporaryFile(suffix=".npz") as handle:
