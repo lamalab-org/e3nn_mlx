@@ -23,6 +23,13 @@ from ._metal_tp import (
 from .ops_basic import compile_or_identity, get_extension
 
 
+# Empirical crossover/metadata limits for the scalar-path Metal dispatch.
+# Keep these named and centralized so benchmark-driven tuning does not require
+# modifying the selection control flow.
+_METAL_SCALAR_PATH_MAX_TERMS = 2_000_000
+_METAL_SCALAR_PATH_MAX_BATCH = 512
+
+
 @dataclass(frozen=True, slots=True)
 class TensorProductPlan:
     irreps_in1: Irreps
@@ -547,23 +554,26 @@ class TensorProduct(mlx_module_base()):
         return self._output_mask
 
     def __deepcopy__(self, memo):
-        """Copy module state without trying to pickle compiled callables.
+        """Copy MLX module and Python state without copying runtime callables.
 
-        MLX compiled functions and custom functions are process-local runtime
-        objects. The copied module keeps identical parameters and semantics and
-        lazily uses the general array implementation.
+        ``mlx.nn.Module`` stores registered arrays/lists/dicts in the inherited
+        dictionary and ordinary Python attributes in ``__dict__``; those stores
+        are disjoint by construction. MLX compiled functions and custom
+        functions are process-local runtime objects, so the copy explicitly
+        resets them and initially uses the general array implementation.
         """
 
         duplicate = self.__class__.__new__(self.__class__)
+        dict.__init__(duplicate)
         memo[id(self)] = duplicate
-        for name, value in self.items():
-            duplicate[name] = copy.deepcopy(value, memo)
-        for name, value in self.__dict__.items():
+        for name, value in dict.items(self):
+            dict.__setitem__(duplicate, name, copy.deepcopy(value, memo))
+        for name, value in vars(self).items():
             if name in {"_metal_operation", "_compiled"}:
                 continue
-            setattr(duplicate, name, copy.deepcopy(value, memo))
-        duplicate._metal_operation = None
-        duplicate._compiled = duplicate._call_arrays
+            object.__setattr__(duplicate, name, copy.deepcopy(value, memo))
+        object.__setattr__(duplicate, "_metal_operation", None)
+        object.__setattr__(duplicate, "_compiled", duplicate._call_arrays)
         return duplicate
 
     def _build_output_mask(self, mx):
@@ -656,7 +666,7 @@ class TensorProduct(mlx_module_base()):
         # multiplicity mixing belongs in MLX's matrix kernels. Guard before
         # allocating padded metadata, which can otherwise be much larger than
         # the learned parameter tensor for high-multiplicity uvw products.
-        if estimated_terms > 2_000_000:
+        if estimated_terms > _METAL_SCALAR_PATH_MAX_TERMS:
             self._metal_operation = None
             return
         metadata = build_metadata(
@@ -694,7 +704,7 @@ class TensorProduct(mlx_module_base()):
         # at large edge counts and are not subject to this crossover guard.
         if (
             getattr(self, "_metal_kernel_kind", None) == "scalar_paths"
-            and left_array.shape[0] > 512
+            and left_array.shape[0] > _METAL_SCALAR_PATH_MAX_BATCH
         ):
             return None
         if self.weight_numel > 0:

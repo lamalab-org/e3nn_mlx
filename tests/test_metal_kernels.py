@@ -28,6 +28,22 @@ def test_spherical_harmonics_kernel_matches_general_forward_gradient_and_hessian
 
     assert _maximum_error(output(vectors, True), output(vectors, False)) < 2e-5
 
+    # MLX preserves the positional-argument tree for custom VJPs. For a
+    # one-argument custom function the callback receives the array directly,
+    # not a one-tuple. Exercise VJP explicitly so a tuple-unpacking regression
+    # cannot hide behind mx.grad.
+    _, (kernel_vjp,) = mx.vjp(
+        lambda value: output(value, True),
+        (vectors,),
+        (coefficients,),
+    )
+    _, (general_vjp,) = mx.vjp(
+        lambda value: output(value, False),
+        (vectors,),
+        (coefficients,),
+    )
+    assert _maximum_error(kernel_vjp, general_vjp) < 2e-4
+
     def loss(value, enabled):
         residual = output(value, enabled) - coefficients
         return mx.sum(residual * residual)
