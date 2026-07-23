@@ -92,6 +92,34 @@ def test_cartesian_rank_two_round_trip_and_metadata() -> None:
     assert _max_abs(tensor.project_to_cartesian() - matrix) < 2e-5
 
 
+def test_cartesian_rank_two_legacy_basis_matches_original_tutorial_table() -> None:
+    mx = mlx_backend._require()
+    basis = CartesianTensor(mx.zeros((3, 3)), legacy_basis=True).change_of_basis
+    diagonal_columns = mx.stack([basis[:, axis, axis] for axis in range(3)])
+    expected = mx.array(
+        [
+            [0.58, 0.0, 0.0, 0.0, 0.0, 0.0, 0.41, 0.0, -0.71],
+            [0.58, 0.0, 0.0, 0.0, 0.0, 0.0, 0.41, 0.0, 0.71],
+            [0.58, 0.0, 0.0, 0.0, 0.0, 0.0, -0.82, 0.0, 0.0],
+        ]
+    )
+    assert _max_abs(mx.round(diagonal_columns, decimals=2) - expected) < 1e-6
+
+    for first, second, expected_index in ((0, 1, 2), (0, 2, 1), (1, 2, 3)):
+        antisymmetric = mx.zeros((3, 3)).at[first, second].add(1.0)
+        antisymmetric = antisymmetric.at[second, first].add(-1.0)
+        converted = CartesianTensor(
+            antisymmetric,
+            legacy_basis=True,
+        ).to_irrep_tensor().array
+        nonzero = [
+            index
+            for index, value in enumerate(converted.tolist())
+            if abs(value) > 1e-6
+        ]
+        assert nonzero == [expected_index]
+
+
 def test_cartesian_symmetry_projection_and_spherical_conversion() -> None:
     mx = mlx_backend._require()
     raw = mx.arange(9, dtype=mx.float32).reshape(3, 3)
@@ -140,3 +168,6 @@ def test_cartesian_higher_rank_tutorial_examples() -> None:
         (1, 4, 1),
     ]
     assert elasticity.change_of_basis.shape == (36, 3, 3, 3, 3)
+
+    with pytest.raises(ValueError, match="rank-two"):
+        CartesianTensor(mx.zeros((3, 3, 3)), legacy_basis=True)

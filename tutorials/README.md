@@ -41,3 +41,15 @@ r, f = SphericalTensor(coefficients).plot(
     legacy_axes=True,
 )
 ```
+
+The old rank-two Cartesian table additionally used historical Clebsch--Gordan
+phases. Reproduce its transformation matrix with:
+
+```python
+cartesian = CartesianTensor(matrix, legacy_basis=True)
+Rs, Q = cartesian.to_irrep_transformation()
+```
+
+This mode is intentionally separate from `SphericalTensor.plot(
+legacy_axes=True)`: `legacy_basis` changes coefficients and the
+change-of-basis matrix, while `legacy_axes` changes only displayed coordinates.

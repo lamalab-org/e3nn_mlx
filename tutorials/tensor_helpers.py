@@ -221,7 +221,13 @@ class SphericalTensor(IrrepTensor):
 class CartesianTensor:
     """Convert rank-N Cartesian tensors into the coupled irrep basis."""
 
-    def __init__(self, tensor: Any, formula: str | None = None) -> None:
+    def __init__(
+        self,
+        tensor: Any,
+        formula: str | None = None,
+        *,
+        legacy_basis: bool = False,
+    ) -> None:
         self.array = mx.array(tensor)
         if self.array.ndim < 1 or any(size != 3 for size in self.array.shape):
             raise ValueError("CartesianTensor expects an unbatched tensor with every axis of size 3")
@@ -232,10 +238,33 @@ class CartesianTensor:
         if self.formula.split("=", 1)[0].lstrip("+-") != labels:
             raise ValueError(f"formula must start with {labels!r} for a rank-{self.array.ndim} tensor")
         self._decomposition = o3.ReducedTensorProducts(self.formula, **{labels[0]: "1o"})
+        self.legacy_basis = bool(legacy_basis)
+        if self.legacy_basis and self.array.ndim != 2:
+            raise ValueError("legacy_basis is currently defined for rank-two Cartesian tensors")
 
     @property
     def change_of_basis(self):
-        return self._decomposition.change_of_basis
+        basis = self._decomposition.change_of_basis
+        if not self.legacy_basis:
+            return basis
+
+        # The historical tutorial first mapped Cartesian (x, y, z) components
+        # to its irreducible (y, z, x) vector basis. Expressed as a basis acting
+        # directly on the original Cartesian tensor, this permutes both input
+        # axes by the inverse cycle (z, x, y).
+        inverse_cycle = mx.array([2, 0, 1])
+        basis = basis[:, inverse_cycle][:, :, inverse_cycle]
+
+        # The old numerical Wigner-3j construction chose the opposite phase for
+        # the rank-two l=2 coupling. Irrep phases are conventional, but applying
+        # it here reproduces the tutorial's printed transformation exactly.
+        phases = mx.concatenate(
+            [
+                mx.full((part.mul * part.ir.dim,), -1.0 if part.ir.l == 2 else 1.0)
+                for part in self.irreps
+            ]
+        ).astype(basis.dtype)
+        return phases[:, None, None] * basis
 
     @property
     def irreps(self) -> o3.Irreps:
@@ -263,5 +292,5 @@ class CartesianTensor:
     def __repr__(self) -> str:
         return (
             f"CartesianTensor(shape={self.array.shape}, formula={self.formula!r}, "
-            f"irreps={self.irreps})"
+            f"irreps={self.irreps}, legacy_basis={self.legacy_basis})"
         )
