@@ -102,3 +102,27 @@ def test_upstream_reduced_tensor_change_of_basis_is_orthonormal_and_compilable()
     )
     expected = module(*(_array("1e", value) for value in values)).array
     assert _max_abs(compiled(*values) - expected) < 3e-6
+
+
+@pytest.mark.mlx
+def test_upstream_reduced_tensor_supports_intermediate_and_output_filters() -> None:
+    mx = mlx_backend._require()
+    irreps = o3.Irreps.spherical_harmonics(4)
+    allowed_mid = list(o3.Irrep.iterator(lmax=4))
+    allowed_out = list(o3.Irrep.iterator(lmax=0))
+    module = o3.ReducedTensorProducts(
+        "ijk=jik=ikj",
+        i=irreps,
+        filter_ir_mid=allowed_mid,
+        filter_ir_out=allowed_out,
+    )
+
+    assert all(part.ir.l == 0 for part in module.irreps_out)
+    assert module.change_of_basis.shape[1:] == (irreps.dim,) * 3
+    inputs = [mx.random.normal(shape=(2, irreps.dim)) for _ in range(3)]
+    expected = mx.einsum("xijk,zi,zj,zk->zx", module.change_of_basis, *inputs)
+    actual = module(
+        *(_array(irreps, values) for values in inputs)
+    ).array
+    assert _max_abs(actual - expected) < 3e-6
+    _assert_equivariant(module, inputs)

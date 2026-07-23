@@ -69,6 +69,8 @@ DOCUMENTED_EVIDENCE = {
         "tests/test_upstream_o3_tensor_product.py::test_upstream_tensor_product_unshared_weight_broadcast_and_validation",
     "tensor-product wrappers match explicit contractions":
         "tests/test_tensor_product_correctness.py::test_full_tensor_product_matches_explicit_tensor_product",
+    "reduced-tensor intermediate and output filters":
+        "tests/test_upstream_o3_reduce_tensor.py::test_upstream_reduced_tensor_supports_intermediate_and_output_filters",
     "lazy package import without MLX":
         "tests/test_nn_import_policy.py::test_nn_namespace_imports_without_site_packages",
     "gate-points exact documented configuration":
@@ -175,6 +177,11 @@ DOCUMENTED_SOURCE_CONTRACTS = (
         "docs/COMPATIBILITY.md",
         "`e3nn_core` remains importable without MLX.",
         "tests/test_nn_import_policy.py::test_nn_namespace_imports_without_site_packages",
+    ),
+    (
+        "docs/guide/tutorial_compatibility.md",
+        "`filter_ir_mid` restricts every sequential Clebsch--Gordan coupling, including the final coupling.",
+        "tests/test_upstream_o3_reduce_tensor.py::test_upstream_reduced_tensor_supports_intermediate_and_output_filters",
     ),
     (
         "docs/HIGH_LEVEL_API.md",

@@ -28,6 +28,51 @@ r, f = SphericalTensor(coefficients).plot(relu=False, res=50)
 r, f = np.asarray(r), np.asarray(f)
 ```
 
+The historical explicit-bandwidth constructor remains supported:
+
+```python
+spherical = SphericalTensor(signal, L_max)
+```
+
+The second argument is optional because the helper can infer `L_max` from the
+coefficient count.
+
+The later invariants tutorial's representation-descriptor form and weighted
+Dirac projection are supported as well:
+
+```python
+descriptor = SphericalTensor(lmax=4, p_val=1, p_arg=-1)
+coefficients = descriptor.sum_of_diracs(positions, values)
+peaks = descriptor.with_peaks_at(positions, values)
+rotation = descriptor.D_from_angles(alpha, beta, gamma)
+```
+
+These methods return MLX arrays. Plotly widget properties do not accept MLX
+arrays directly; convert both initial data and interactive updates with
+`numpy.asarray`:
+
+```python
+widget.data[0].z = np.asarray(calc(positions)).T
+```
+
+The core `o3.ReducedTensorProducts` API also accepts the historical
+`filter_ir_mid` and `filter_ir_out` keyword arguments used to build filtered
+bispectrum contractions. See the public
+[tutorial compatibility guide](../docs/guide/tutorial_compatibility.md).
+
+Spherical tensors can be added even when their maximum degrees differ; the
+lower-bandwidth operand is zero-padded first. The historical `.signal` name is
+also available as an alias for the MLX coefficient array, and `.dot()` computes
+the coefficient-space inner product used by the tutorial. The `@` operator
+performs a full tensor product and regroups polar and axial copies by degree,
+matching the tutorial's SO(3)-only output and slice ordering.
+
+As in the original tutorial, `plot()` defaults to unscaled,
+integral-normalized spherical harmonics. The optional `"component"` and
+`"norm"` normalization modes use the modern e3nn scaling conventions.
+Likewise, `from_geometry()` defaults to the tutorial's adjusted least-squares
+projection instead of a raw sum of spherical-harmonic coefficients.
+
 `CartesianTensor` assumes ordinary `(x, y, z)` Cartesian axes. The historical
 notebook's manual `(y, z, x)` permutation belongs to its older e3nn basis and
 must not be repeated with these helpers. To reproduce the historical

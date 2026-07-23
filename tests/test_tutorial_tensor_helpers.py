@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from e3nn_mlx import o3
 from e3nn_mlx.backend import mlx_backend
 from tutorials import CartesianTensor, SphericalTensor
 
@@ -38,6 +39,142 @@ def test_spherical_tensor_plot_and_geometry_helpers() -> None:
     )
     assert geometry.shape == (25,)
     assert geometry.lmax == 4
+    points = mx.array(
+        [
+            [-0.5, -0.5, -0.5],
+            [0.5, 0.5, -0.5],
+            [0.5, -0.5, 0.5],
+            [-0.5, 0.5, 0.5],
+        ]
+    )
+    tetrahedron = SphericalTensor.from_geometry(points, 6)
+    harmonics = o3.spherical_harmonics(
+        list(range(7)),
+        points,
+        normalize=True,
+        normalization="integral",
+    )
+    expected_radii = mx.linalg.norm(points, axis=-1)
+    assert _max_abs(harmonics @ tetrahedron.array - expected_radii) < 2e-5
+
+
+def test_spherical_tensor_accepts_historical_explicit_lmax() -> None:
+    mx = mlx_backend._require()
+    signal = mx.zeros((4,))
+
+    tensor = SphericalTensor(signal, 1)
+
+    assert tensor.lmax == 1
+    assert tensor.shape == (4,)
+    with pytest.raises(ValueError, match="requires 9 coefficients"):
+        SphericalTensor(signal, 2)
+    with pytest.raises(ValueError, match="non-negative integer"):
+        SphericalTensor(signal, -1)
+
+
+def test_spherical_tensor_descriptor_constructor_and_sum_of_diracs() -> None:
+    mx = mlx_backend._require()
+    descriptor = SphericalTensor(lmax=4, p_val=1, p_arg=-1)
+    positions = mx.array([[1.0, 0.0, 0.0]])
+    values = mx.array([2.0])
+
+    coefficients = descriptor.sum_of_diracs(positions, values)
+    harmonics = o3.spherical_harmonics(
+        list(range(5)),
+        positions,
+        normalize=True,
+        normalization="integral",
+    )
+
+    assert descriptor.Rs == [
+        (1, 0, 1),
+        (1, 1, -1),
+        (1, 2, 1),
+        (1, 3, -1),
+        (1, 4, 1),
+    ]
+    assert coefficients.shape == (25,)
+    assert abs(float(harmonics @ coefficients) - 2.0) < 2e-5
+    assert SphericalTensor(4, 1, -1).Rs == descriptor.Rs
+
+    batched = descriptor.sum_of_diracs(
+        mx.ones((1, 3, 2, 3)),
+        mx.ones((2, 1, 1)),
+    )
+    assert batched.shape == (2, 3, 25)
+
+    angles = (mx.array(0.2), mx.array(-0.3), mx.array(0.4))
+    rotation = descriptor.D_from_angles(*angles)
+    expected = o3.irreps_wigner_d(descriptor.irreps, *angles)
+    assert rotation.shape == (25, 25)
+    assert _max_abs(rotation - expected) == 0.0
+
+
+def test_spherical_tensor_with_peaks_at_fits_values_and_default_radii() -> None:
+    mx = mlx_backend._require()
+    descriptor = SphericalTensor(4, p_val=1, p_arg=-1)
+    points = mx.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ]
+    )
+    harmonics = o3.spherical_harmonics(
+        list(range(5)),
+        points,
+        normalize=True,
+        normalization="integral",
+    )
+
+    values = mx.array([-1.5, 2.0])
+    fitted = descriptor.with_peaks_at(points, values)
+    assert fitted.shape == (25,)
+    assert _max_abs(harmonics @ fitted - values) < 2e-5
+
+    scaled_points = mx.array([[1.0, 0.0, 0.0], [0.0, 3.0, 4.0]])
+    scaled_harmonics = o3.spherical_harmonics(
+        list(range(5)),
+        scaled_points,
+        normalize=True,
+        normalization="integral",
+    )
+    fitted_radii = descriptor.with_peaks_at(scaled_points)
+    assert _max_abs(scaled_harmonics @ fitted_radii - mx.array([1.0, 5.0])) < 2e-5
+
+    with pytest.raises(ValueError, match="p_val=1"):
+        SphericalTensor(4, p_val=-1, p_arg=-1).with_peaks_at(points)
+
+
+def test_spherical_tensor_addition_aligns_bandwidths() -> None:
+    mx = mlx_backend._require()
+    degree_one = SphericalTensor(mx.arange(4, dtype=mx.float32), 1)
+    degree_two = SphericalTensor(mx.ones((9,)), 2)
+
+    result = degree_one + degree_two
+
+    assert result.lmax == 2
+    assert result.shape == (9,)
+    assert result.signal is result.array
+    assert _max_abs(result.array[:4] - (degree_one.array + 1.0)) == 0.0
+    assert _max_abs(result.array[4:] - 1.0) == 0.0
+    assert degree_two.change_lmax(1).shape == (4,)
+    assert float(degree_one.dot(degree_one)) == 14.0
+    assert float(degree_one.dot(SphericalTensor(mx.zeros((4,)), 1))) == 0.0
+
+
+def test_spherical_tensor_full_product_preserves_tutorial_slice_order() -> None:
+    mx = mlx_backend._require()
+    signal_1 = mx.zeros((4,)).at[1].add(1.0)
+    signal_2 = mx.zeros((4,)).at[3].add(1.0)
+
+    product = SphericalTensor(signal_1, 1) @ SphericalTensor(signal_2, 1)
+
+    assert product.Rs == [(2, 0, 0), (3, 1, 0), (1, 2, 0)]
+    assert product.shape == (16,)
+    assert _max_abs(product.array[:2]) < 1e-6
+    assert _max_abs(product.array[2:5]) > 0.1
+    assert _max_abs(product.array[5:11]) < 1e-6
+    assert _max_abs(product.array[11:]) > 0.1
 
 
 def test_spherical_tensor_legacy_axes_follow_tutorial_l1_order() -> None:
@@ -77,6 +214,25 @@ def test_spherical_tensor_legacy_axes_follow_tutorial_l1_order() -> None:
             ]
         )
     ) < 0.02
+
+
+def test_spherical_tensor_plot_uses_historical_unscaled_normalization() -> None:
+    mx = mlx_backend._require()
+    coefficients = mx.arange(16, dtype=mx.float32) / 10.0
+    tensor = SphericalTensor(coefficients)
+    sphere, values = tensor.plot(
+        relu=False,
+        radius=False,
+        res=21,
+    )
+    expected = o3.spherical_harmonics(
+        list(range(tensor.lmax + 1)),
+        sphere,
+        normalize=True,
+        normalization="integral",
+    ) @ coefficients
+
+    assert _max_abs(values - expected) < 2e-5
 
 
 def test_cartesian_rank_two_round_trip_and_metadata() -> None:
