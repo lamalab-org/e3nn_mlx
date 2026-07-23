@@ -11,4 +11,4 @@ docs/api/generated/
 .DS_Store
 evals/.venv-torch/
 evals/results/
-torch_compare/
+
