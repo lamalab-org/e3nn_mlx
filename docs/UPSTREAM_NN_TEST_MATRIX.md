@@ -52,17 +52,6 @@ the MLX parameter-tree and `value_and_grad` assertions in the eight FC cases.
 - parity-aware `S2Activation`, including input-bandwidth-aware S2 projection normalization;
 - dense Wigner-basis `SO3Grid` and `SO3Activation` with normalized Haar quadrature.
 
-## Resolved compatibility defects
-
-Every item below is fixed and protected by the mapped regression suites:
-
-1. S2 output projection rejected the valid upstream case where `lmax_out > lmax_in` and used the wrong bandwidth normalization.
-2. Gate lacked the upstream five-argument API and sorted extraction path.
-3. FC layer construction incorrectly used strict adjacent-width zipping.
-4. Dropout needed one random mask per irrep copy, shared over all components, to preserve equivariance.
-5. Odd scalar activations and spherical signals required activation-parity propagation to preserve inversion equivariance.
-6. Norm-based activation needed epsilon clamping before the square root to keep zero-input gradients finite.
-
 ## Release gate
 
 Completion requires all of the following from the repository root on Apple Silicon:
