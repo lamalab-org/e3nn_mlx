@@ -30,4 +30,14 @@ r, f = np.asarray(r), np.asarray(f)
 
 `CartesianTensor` assumes ordinary `(x, y, z)` Cartesian axes. The historical
 notebook's manual `(y, z, x)` permutation belongs to its older e3nn basis and
-must not be repeated with these helpers.
+must not be repeated with these helpers. To reproduce the historical
+orientation only for visualization, request it explicitly:
+
+```python
+r, f = SphericalTensor(coefficients).plot(
+    relu=False,
+    radius=True,
+    res=50,
+    legacy_axes=True,
+)
+```

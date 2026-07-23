@@ -40,6 +40,45 @@ def test_spherical_tensor_plot_and_geometry_helpers() -> None:
     assert geometry.lmax == 4
 
 
+def test_spherical_tensor_legacy_axes_follow_tutorial_l1_order() -> None:
+    mx = mlx_backend._require()
+    modern_peaks = []
+    legacy_peaks = []
+    for component in range(3):
+        coefficients = mx.zeros((4,)).at[1 + component].add(1.0)
+        tensor = SphericalTensor(coefficients)
+        modern_surface, modern_values = tensor.plot(
+            relu=False,
+            radius=False,
+            res=101,
+        )
+        legacy_surface, legacy_values = tensor.plot(
+            relu=False,
+            radius=False,
+            res=101,
+            legacy_axes=True,
+        )
+        maximum = int(mx.argmax(modern_values))
+        row, column = divmod(maximum, modern_values.shape[1])
+        modern_peaks.append(modern_surface[row, column])
+        legacy_peaks.append(legacy_surface[row, column])
+        assert _max_abs(legacy_values - modern_values) == 0.0
+
+    modern = mx.stack(modern_peaks)
+    legacy = mx.stack(legacy_peaks)
+    assert _max_abs(modern - mx.eye(3)) < 0.02
+    assert _max_abs(
+        legacy
+        - mx.array(
+            [
+                [0.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+                [1.0, 0.0, 0.0],
+            ]
+        )
+    ) < 0.02
+
+
 def test_cartesian_rank_two_round_trip_and_metadata() -> None:
     mx = mlx_backend._require()
     matrix = mx.arange(9, dtype=mx.float32).reshape(3, 3)

@@ -154,11 +154,16 @@ class SphericalTensor(IrrepTensor):
         radius: bool = True,
         res: int = 100,
         normalization: str = "component",
+        legacy_axes: bool = False,
     ):
         """Return surface coordinates and values suitable for Plotly.
 
         The helper deliberately returns MLX arrays. Convert them with
         ``numpy.asarray`` before passing them to plotting libraries.
+
+        Set ``legacy_axes=True`` to reproduce the historical tutorial's
+        ``(y, z, x)`` degree-one display convention. The default follows the
+        current e3nn-mlx ``(x, y, z)`` basis.
         """
 
         if self.array.ndim != 1:
@@ -200,6 +205,10 @@ class SphericalTensor(IrrepTensor):
         )
         values = harmonics @ (self.array * scales)
         grid = o3.angles_to_xyz(alphas[None, :], betas[:, None])
+        if legacy_axes:
+            # Map physical x -> displayed y, y -> displayed z, and z ->
+            # displayed x, matching the old tutorial's (y, z, x) labels.
+            grid = grid[..., [2, 0, 1]]
         colors = mx.maximum(values, 0.0) if relu else values
         if radius:
             radial = colors if relu else mx.abs(values)
