@@ -80,6 +80,7 @@ def test_optimizer_step_updates_nested_parameters_and_reduces_loss() -> None:
     mx, nn = require_mlx()
     import mlx.optimizers as optim
 
+    mx.random.seed(0)
     model = _make_model(compile_layers=True)
     vectors, edges, targets = _training_data()
 
@@ -151,4 +152,3 @@ def test_parameterless_modules_nest_without_polluting_parameter_tree() -> None:
     container = Container()
     assert set(container.children()) == {"gate", "norm"}
     assert container.parameters() == {"gate": {}, "norm": {}}
-
