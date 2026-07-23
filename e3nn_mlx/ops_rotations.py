@@ -207,19 +207,68 @@ def matrix_to_quaternion(matrix):
 
     mx, _ = require_mlx()
     m00, m11, m22 = matrix[..., 0, 0], matrix[..., 1, 1], matrix[..., 2, 2]
-    zero = mx.array(0.0, dtype=matrix.dtype)
+    m01, m02 = matrix[..., 0, 1], matrix[..., 0, 2]
+    m10, m12 = matrix[..., 1, 0], matrix[..., 1, 2]
+    m20, m21 = matrix[..., 2, 0], matrix[..., 2, 1]
+    epsilon = mx.array(1e-12, dtype=matrix.dtype)
 
-    def signed_sqrt(value, sign_source):
-        magnitude = 0.5 * mx.sqrt(mx.maximum(zero, value))
-        return mx.where(sign_source < 0, -magnitude, magnitude)
+    def scale(value):
+        return 2.0 * mx.sqrt(mx.maximum(value, epsilon))
 
-    w = 0.5 * mx.sqrt(mx.maximum(zero, 1.0 + m00 + m11 + m22))
-    x = signed_sqrt(1.0 + m00 - m11 - m22, matrix[..., 2, 1] - matrix[..., 1, 2])
-    y = signed_sqrt(1.0 - m00 + m11 - m22, matrix[..., 0, 2] - matrix[..., 2, 0])
-    z = signed_sqrt(1.0 - m00 - m11 + m22, matrix[..., 1, 0] - matrix[..., 0, 1])
-    quaternion = mx.stack([w, x, y, z], axis=-1)
+    trace = m00 + m11 + m22
+    s_trace = scale(1.0 + trace)
+    from_trace = mx.stack(
+        [
+            0.25 * s_trace,
+            (m21 - m12) / s_trace,
+            (m02 - m20) / s_trace,
+            (m10 - m01) / s_trace,
+        ],
+        axis=-1,
+    )
+
+    s_x = scale(1.0 + m00 - m11 - m22)
+    from_x = mx.stack(
+        [
+            (m21 - m12) / s_x,
+            0.25 * s_x,
+            (m01 + m10) / s_x,
+            (m02 + m20) / s_x,
+        ],
+        axis=-1,
+    )
+
+    s_y = scale(1.0 - m00 + m11 - m22)
+    from_y = mx.stack(
+        [
+            (m02 - m20) / s_y,
+            (m01 + m10) / s_y,
+            0.25 * s_y,
+            (m12 + m21) / s_y,
+        ],
+        axis=-1,
+    )
+
+    s_z = scale(1.0 - m00 - m11 + m22)
+    from_z = mx.stack(
+        [
+            (m10 - m01) / s_z,
+            (m02 + m20) / s_z,
+            (m12 + m21) / s_z,
+            0.25 * s_z,
+        ],
+        axis=-1,
+    )
+
+    diagonal = mx.where(
+        ((m00 > m11) & (m00 > m22))[..., None],
+        from_x,
+        mx.where((m11 > m22)[..., None], from_y, from_z),
+    )
+    quaternion = mx.where((trace > 0.0)[..., None], from_trace, diagonal)
     norm = mx.sqrt(mx.sum(quaternion * quaternion, axis=-1, keepdims=True))
-    return quaternion / mx.maximum(norm, mx.array(1e-12, dtype=matrix.dtype))
+    quaternion = quaternion / mx.maximum(norm, epsilon)
+    return mx.where(quaternion[..., :1] < 0.0, -quaternion, quaternion)
 
 
 def angles_to_quaternion(alpha, beta, gamma):

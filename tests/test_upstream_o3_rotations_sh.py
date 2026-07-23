@@ -54,6 +54,29 @@ def test_upstream_rotation_conversions_and_composition() -> None:
 
 
 @pytest.mark.mlx
+def test_matrix_to_axis_angle_is_stable_at_pi() -> None:
+    mx = mlx_backend._require()
+    axes = mx.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 2.0, -3.0],
+            [-2.0, 3.0, 1.0],
+        ]
+    )
+    axes = axes / mx.sqrt(mx.sum(axes * axes, axis=-1, keepdims=True))
+    angles = mx.array([math.pi, math.pi, math.pi, math.pi, math.pi - 1e-6])
+    original = o3.axis_angle_to_matrix(axes, angles)
+
+    quaternion = o3.matrix_to_quaternion(original)
+    recovered_axis, recovered_angle = o3.matrix_to_axis_angle(original)
+
+    assert _max_abs(o3.quaternion_to_matrix(quaternion) - original) < 2e-6
+    assert _max_abs(o3.axis_angle_to_matrix(recovered_axis, recovered_angle) - original) < 2e-6
+
+
+@pytest.mark.mlx
 def test_upstream_rotation_inverse_and_coordinate_axes() -> None:
     mx = mlx_backend._require()
     angles = o3.rand_angles(32)
