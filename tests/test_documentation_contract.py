@@ -179,11 +179,6 @@ DOCUMENTED_SOURCE_CONTRACTS = (
         "tests/test_nn_import_policy.py::test_nn_namespace_imports_without_site_packages",
     ),
     (
-        "docs/guide/tutorial_compatibility.md",
-        "`filter_ir_mid` restricts every sequential Clebsch--Gordan coupling, including the final coupling.",
-        "tests/test_upstream_o3_reduce_tensor.py::test_upstream_reduced_tensor_supports_intermediate_and_output_filters",
-    ),
-    (
         "docs/HIGH_LEVEL_API.md",
         "High-level modules preserve the caller's style",
         "tests/test_high_level_api.py::test_o3_linear_raw_and_typed_calls_are_exact_and_compile",
