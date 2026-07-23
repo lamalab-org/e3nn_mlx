@@ -1,0 +1,539 @@
+{
+  "schema": 1,
+  "seed": 20260723,
+  "e3nn": "0.5.8",
+  "torch": "2.7.1",
+  "numpy": "2.3.1",
+  "dtype": "float64",
+  "tensor_products": [
+    {
+      "name": "uvw",
+      "irreps_in1": "1o",
+      "irreps_in2": "1o",
+      "irreps_out": "2x0e+2x1e+2x2e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvw",
+          true
+        ],
+        [
+          0,
+          0,
+          1,
+          "uvw",
+          true
+        ],
+        [
+          0,
+          0,
+          2,
+          "uvw",
+          true
+        ]
+      ],
+      "weight_numel": 6,
+      "derivative_splits": [
+        3,
+        6
+      ]
+    },
+    {
+      "name": "uvu",
+      "irreps_in1": "2x0e",
+      "irreps_in2": "3x0e",
+      "irreps_out": "2x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvu",
+          true
+        ]
+      ],
+      "weight_numel": 6,
+      "derivative_splits": [
+        2,
+        5
+      ]
+    },
+    {
+      "name": "uvu_grouped",
+      "irreps_in1": "2x1o",
+      "irreps_in2": "3x1o",
+      "irreps_out": "2x0e+2x1e+2x2e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvu",
+          true
+        ],
+        [
+          0,
+          0,
+          1,
+          "uvu",
+          true
+        ],
+        [
+          0,
+          0,
+          2,
+          "uvu",
+          true
+        ]
+      ],
+      "weight_numel": 18,
+      "derivative_splits": [
+        6,
+        15
+      ]
+    },
+    {
+      "name": "uvv",
+      "irreps_in1": "2x0e",
+      "irreps_in2": "3x0e",
+      "irreps_out": "3x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvv",
+          true
+        ]
+      ],
+      "weight_numel": 6,
+      "derivative_splits": [
+        2,
+        5
+      ]
+    },
+    {
+      "name": "uuw",
+      "irreps_in1": "2x0e",
+      "irreps_in2": "2x0e",
+      "irreps_out": "2x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uuw",
+          true
+        ]
+      ],
+      "weight_numel": 4,
+      "derivative_splits": [
+        2,
+        4
+      ]
+    },
+    {
+      "name": "uuu",
+      "irreps_in1": "2x0e",
+      "irreps_in2": "2x0e",
+      "irreps_out": "2x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uuu",
+          true
+        ]
+      ],
+      "weight_numel": 2,
+      "derivative_splits": [
+        2,
+        4
+      ]
+    },
+    {
+      "name": "uvuv",
+      "irreps_in1": "2x0e",
+      "irreps_in2": "3x0e",
+      "irreps_out": "6x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvuv",
+          true
+        ]
+      ],
+      "weight_numel": 6,
+      "derivative_splits": [
+        2,
+        5
+      ]
+    },
+    {
+      "name": "uvu_lt_v",
+      "irreps_in1": "3x0e",
+      "irreps_in2": "3x0e",
+      "irreps_out": "3x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvu<v",
+          true
+        ]
+      ],
+      "weight_numel": 3,
+      "derivative_splits": [
+        3,
+        6
+      ]
+    },
+    {
+      "name": "u_lt_vw",
+      "irreps_in1": "3x0e",
+      "irreps_in2": "3x0e",
+      "irreps_out": "2x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "u<vw",
+          true
+        ]
+      ],
+      "weight_numel": 6,
+      "derivative_splits": [
+        3,
+        6
+      ]
+    },
+    {
+      "name": "uvu_unshared",
+      "irreps_in1": "2x0e",
+      "irreps_in2": "3x0e",
+      "irreps_out": "2x0e",
+      "instructions": [
+        [
+          0,
+          0,
+          0,
+          "uvu",
+          true
+        ]
+      ],
+      "shared_weights": false,
+      "weight_numel": 6,
+      "derivative_splits": [
+        2,
+        5
+      ]
+    }
+  ],
+  "tensor_product_wrappers": [
+    {
+      "name": "full",
+      "class": "FullTensorProduct",
+      "irreps_in1": "2x1o",
+      "irreps_in2": "3x1o",
+      "irreps_out": "6x0e+6x1e+6x2e",
+      "weight_numel": 0
+    },
+    {
+      "name": "fully_connected",
+      "class": "FullyConnectedTensorProduct",
+      "irreps_in1": "2x0e+2x1o",
+      "irreps_in2": "1x0e+1x1o",
+      "irreps_out": "3x0e+2x1e+2x2e",
+      "weight_numel": 20
+    },
+    {
+      "name": "elementwise",
+      "class": "ElementwiseTensorProduct",
+      "irreps_in1": "2x1o",
+      "irreps_in2": "2x1o",
+      "irreps_out": "2x0e+2x1e+2x2e",
+      "weight_numel": 0
+    },
+    {
+      "name": "tensor_square",
+      "class": "TensorSquare",
+      "irreps_in1": "2x1o",
+      "irreps_in2": "2x1o",
+      "irreps_out": "1x0e+2x0e+1x1e+1x2e+2x2e",
+      "weight_numel": 0
+    }
+  ],
+  "modules": [
+    {
+      "name": "linear",
+      "irreps_in": "2x0e+2x1o",
+      "irreps_out": "3x0e+2x1o",
+      "weight_numel": 10,
+      "bias_numel": 3,
+      "derivative_splits": [
+        8,
+        18
+      ]
+    },
+    {
+      "name": "norm",
+      "irreps_in": "2x0e+2x1o",
+      "irreps_out": "4x0e",
+      "output_count": 1,
+      "derivatives": true
+    },
+    {
+      "name": "activation",
+      "irreps_in": "2x0e+1x0o",
+      "irreps_out": "2x0e+1x0e",
+      "output_count": 1,
+      "derivatives": true
+    },
+    {
+      "name": "gate",
+      "irreps_in": "4x0e+2x1o",
+      "irreps_out": "2x0e+2x1o",
+      "output_count": 1,
+      "derivatives": true
+    },
+    {
+      "name": "norm_activation",
+      "irreps_in": "2x0e+2x1o",
+      "irreps_out": "2x0e+2x1o",
+      "output_count": 1,
+      "derivatives": true
+    },
+    {
+      "name": "identity",
+      "irreps_in": "2x0e+2x1o",
+      "irreps_out": "2x0e+2x1o",
+      "output_count": 1,
+      "derivatives": false
+    },
+    {
+      "name": "extract",
+      "irreps_in": "1x0e+1x1o+2x0e",
+      "irreps_out": "",
+      "output_count": 2,
+      "derivatives": false
+    },
+    {
+      "name": "extract_ir",
+      "irreps_in": "1x0e+1x1o+2x0e",
+      "irreps_out": "1x0e+2x0e",
+      "output_count": 1,
+      "derivatives": false
+    },
+    {
+      "name": "dropout_eval",
+      "irreps_in": "2x0e+2x1o",
+      "irreps_out": "2x0e+2x1o",
+      "output_count": 1,
+      "derivatives": false
+    },
+    {
+      "name": "batch_norm",
+      "irreps_in": "2x0e+2x1o"
+    },
+    {
+      "name": "fully_connected_net",
+      "widths": [
+        3,
+        5,
+        2
+      ],
+      "parameters": [
+        {
+          "name": "layer0.weight",
+          "shape": [
+            3,
+            5
+          ]
+        },
+        {
+          "name": "layer1.weight",
+          "shape": [
+            5,
+            2
+          ]
+        }
+      ]
+    },
+    {
+      "name": "s2_activation",
+      "irreps_in": "1x0e+1x1o+1x2e",
+      "irreps_out": "1x0e+1x1o+1x2e",
+      "resolution": 20,
+      "lmax_out": 2
+    },
+    {
+      "name": "so3_activation",
+      "lmax_in": 1,
+      "lmax_out": 1,
+      "resolution": 6
+    }
+  ],
+  "models": [
+    {
+      "name": "gate_points",
+      "parameters": [
+        {
+          "name": "layers.0.first.sc.weight",
+          "shape": [
+            6
+          ]
+        },
+        {
+          "name": "layers.0.first.lin1.weight",
+          "shape": [
+            2
+          ]
+        },
+        {
+          "name": "layers.0.first.fc.layer0.weight",
+          "shape": [
+            5,
+            4
+          ]
+        },
+        {
+          "name": "layers.0.first.fc.layer1.weight",
+          "shape": [
+            4,
+            4
+          ]
+        },
+        {
+          "name": "layers.0.first.lin2.weight",
+          "shape": [
+            12
+          ]
+        },
+        {
+          "name": "layers.1.sc.weight",
+          "shape": [
+            4
+          ]
+        },
+        {
+          "name": "layers.1.lin1.weight",
+          "shape": [
+            8
+          ]
+        },
+        {
+          "name": "layers.1.fc.layer0.weight",
+          "shape": [
+            5,
+            4
+          ]
+        },
+        {
+          "name": "layers.1.fc.layer1.weight",
+          "shape": [
+            4,
+            8
+          ]
+        },
+        {
+          "name": "layers.1.lin2.weight",
+          "shape": [
+            8
+          ]
+        }
+      ],
+      "irreps_in": "0e+1o",
+      "irreps_out": "0e+1o"
+    },
+    {
+      "name": "v2106",
+      "parameters": [
+        {
+          "name": "mp.layers.0.first.sc.weight",
+          "shape": [
+            8
+          ]
+        },
+        {
+          "name": "mp.layers.0.first.lin1.weight",
+          "shape": [
+            2
+          ]
+        },
+        {
+          "name": "mp.layers.0.first.fc.layer0.weight",
+          "shape": [
+            10,
+            100
+          ]
+        },
+        {
+          "name": "mp.layers.0.first.fc.layer1.weight",
+          "shape": [
+            100,
+            7
+          ]
+        },
+        {
+          "name": "mp.layers.0.first.lin2.weight",
+          "shape": [
+            26
+          ]
+        },
+        {
+          "name": "mp.layers.0.first.alpha.weight",
+          "shape": [
+            3
+          ]
+        },
+        {
+          "name": "mp.layers.1.sc.weight",
+          "shape": [
+            4
+          ]
+        },
+        {
+          "name": "mp.layers.1.lin1.weight",
+          "shape": [
+            12
+          ]
+        },
+        {
+          "name": "mp.layers.1.fc.layer0.weight",
+          "shape": [
+            10,
+            100
+          ]
+        },
+        {
+          "name": "mp.layers.1.fc.layer1.weight",
+          "shape": [
+            100,
+            14
+          ]
+        },
+        {
+          "name": "mp.layers.1.lin2.weight",
+          "shape": [
+            14
+          ]
+        },
+        {
+          "name": "mp.layers.1.alpha.weight",
+          "shape": [
+            6
+          ]
+        }
+      ],
+      "irreps_in": "0e+1o",
+      "irreps_out": "0e+1o"
+    }
+  ]
+}
