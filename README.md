@@ -2,7 +2,7 @@
 
 Incremental refactor of e3nn into a backend-neutral core plus an MLX-native runtime.
 
-The P0 implementation currently provides:
+The current implementation provides:
 
 - backend-agnostic O(3) metadata in `e3nn_core`
 - e3nn-compatible real Wigner-3j and Clebsch--Gordan coefficients
@@ -14,9 +14,9 @@ The P0 implementation currently provides:
   modular `v2106` point-model family
 - pinned upstream e3nn numerical fixtures and Apple-Silicon CI coverage
 
-P0 guarantees numerical compatibility through `l=6`; reference and structural
+Numerical compatibility is guaranteed through `l=6`; reference and structural
 tests exercise selected operations through `l=8`.  See
-[`docs/P0_COMPATIBILITY.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/docs/P0_COMPATIBILITY.md) for conventions, shapes,
+[`docs/COMPATIBILITY.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/docs/COMPATIBILITY.md) for conventions, shapes,
 normalization, and the release gate.
 
 ## Installation

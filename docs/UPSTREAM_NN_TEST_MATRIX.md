@@ -19,7 +19,8 @@ The tests are semantic MLX ports rather than textual Torch translations:
 - Torch autograd checks use MLX `grad` or `mlx.nn.value_and_grad`;
 - parameter checks use MLX module parameter trees;
 - `copy.deepcopy` checks are retained;
-- upstream's session-wide float64 repetitions are not applicable because the P0 MLX runtime contract is float32.
+- upstream's session-wide float64 repetitions are not applicable because the
+  current MLX runtime contract is float32.
 
 ## Requirement mapping
 
@@ -51,7 +52,9 @@ the MLX parameter-tree and `value_and_grad` assertions in the eight FC cases.
 - parity-aware `S2Activation`, including input-bandwidth-aware S2 projection normalization;
 - dense Wigner-basis `SO3Grid` and `SO3Activation` with normalized Haar quadrature.
 
-## Defects exposed during the port
+## Resolved compatibility defects
+
+Every item below is fixed and protected by the mapped regression suites:
 
 1. S2 output projection rejected the valid upstream case where `lmax_out > lmax_in` and used the wrong bandwidth normalization.
 2. Gate lacked the upstream five-argument API and sorted extraction path.

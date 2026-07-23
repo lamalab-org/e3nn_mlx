@@ -35,9 +35,11 @@ The tests are semantic MLX ports, not textual Torch translations:
 | `experimental/test_elementwise_tp.py` | production elementwise wrapper agrees with explicit/independent paths for both split patterns and compiles | `tests/test_upstream_o3_tensor_product.py`, `tests/test_tensor_product_correctness.py` |
 | `experimental/test_fulltp.py` | production full wrapper agrees with explicit/independent paths for all four input combinations and compiles | `tests/test_upstream_o3_tensor_product.py`, `tests/test_tensor_product_correctness.py` |
 
-## Defects exposed by the upstream suite
+## Resolved compatibility defects
 
-The ported tests found implementation defects that narrower P0 examples did not expose:
+The ported tests found implementation defects that narrower initial examples
+did not expose. Every item below is fixed and protected by the mapped
+regression suites:
 
 1. matrix-to-axis-angle conversion was unstable near rotations by pi;
 2. `uvw` TensorProduct weights were declared as `(u, v, w)` but evaluated as `(w, u, v)`;

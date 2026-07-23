@@ -8,7 +8,7 @@ differentiation, and generated Metal kernels.
 ```{important}
 This project is an independent MLX port and is currently alpha software. It is
 not a drop-in binary replacement for PyTorch e3nn. Consult the
-[compatibility contract](P0_COMPATIBILITY.md) before depending on an operation
+[compatibility and numerical conventions](COMPATIBILITY.md) before depending on an operation
 that is not covered by the public API below.
 ```
 

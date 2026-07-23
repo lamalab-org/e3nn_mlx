@@ -39,5 +39,5 @@ gate = nn.Gate(
 - TorchScript-specific APIs do not apply to MLX.
 
 For an operation-by-operation statement of supported behavior, see
-the [P0 compatibility contract](../P0_COMPATIBILITY.md) and
+the [compatibility and numerical conventions](../COMPATIBILITY.md) and
 [high-level API notes](../HIGH_LEVEL_API.md).

@@ -1,7 +1,7 @@
-# P0 compatibility contract
+# Compatibility and numerical conventions
 
-This document defines the numerical and API contract for the P0 implementation.
-It is intentionally narrower than full `e3nn` parity.
+This document defines the numerical and API guarantees of the current
+implementation. It is intentionally narrower than full `e3nn` parity.
 
 ## Reference implementation
 
@@ -12,7 +12,8 @@ numerical differences.
 
 ## Supported representations
 
-- Integer angular momenta `0 <= l <= 6` are guaranteed by P0.
+- Integer angular momenta `0 <= l <= 6` are guaranteed by the compatibility
+  baseline.
 - Pure-Python table and structural tests exercise `0 <= l <= 8` where practical.
 - O(3) parity is `p in {-1, 1}`.  The `y` token means `p = (-1)**l`.
 - The real basis, component order, phases, Clebsch--Gordan coefficients, and
@@ -39,10 +40,10 @@ numerical differences.
 
 ## Dtypes
 
-- P0 guarantees `float32` numerical execution.
+- The compatibility baseline guarantees `float32` numerical execution.
 - Static coefficients are generated using Python double precision and converted
   to the input dtype at the MLX boundary.
-- Tensor-product inputs must use the same dtype.  P0 rejects mixed dtypes rather
+- Tensor-product inputs must use the same dtype. Mixed dtypes are rejected rather
   than applying implicit promotion.
 
 ## Normalization

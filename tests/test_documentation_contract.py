@@ -133,8 +133,6 @@ DOCUMENTED_EVIDENCE = {
         "tests/test_documentation_contract.py::test_documented_general_paths_support_jvp",
     "equivariant graph-convolution recipe":
         "tests/test_documentation_contract.py::test_documented_graph_convolution_recipe_is_equivariant",
-    "documentation packaging and deployment":
-        "tests/test_documentation_contract.py::test_documentation_metadata_workflow_and_timing_contracts",
 }
 
 
@@ -144,37 +142,37 @@ DOCUMENTED_EVIDENCE = {
 # explicit decision about its replacement evidence.
 DOCUMENTED_SOURCE_CONTRACTS = (
     (
-        "docs/P0_COMPATIBILITY.md",
+        "docs/COMPATIBILITY.md",
         "Golden reference data is generated with `e3nn==0.5.8`, `torch==2.7.1`, and `numpy==2.3.1`.",
         "tests/test_reference_harness.py::test_reference_versions_are_pinned",
     ),
     (
-        "docs/P0_COMPATIBILITY.md",
-        "Integer angular momenta `0 <= l <= 6` are guaranteed by P0.",
+        "docs/COMPATIBILITY.md",
+        "Integer angular momenta `0 <= l <= 6` are guaranteed by the compatibility baseline.",
         "tests/test_p0_equivariance.py::test_spherical_harmonics_equivariance_through_l6",
     ),
     (
-        "docs/P0_COMPATIBILITY.md",
+        "docs/COMPATIBILITY.md",
         "Euler angles use upstream e3nn's active YXY convention `R = Ry(alpha) Rx(beta) Ry(gamma)`.",
         "tests/test_documentation_contract.py::test_p0_rotation_shape_and_active_yxy_convention",
     ),
     (
-        "docs/P0_COMPATIBILITY.md",
+        "docs/COMPATIBILITY.md",
         "Leading input and unshared-weight dimensions follow NumPy broadcasting.",
         "tests/test_p0_equivariance.py::test_tensor_product_broadcasts_all_leading_dimensions",
     ),
     (
-        "docs/P0_COMPATIBILITY.md",
-        "P0 rejects mixed dtypes rather than applying implicit promotion.",
+        "docs/COMPATIBILITY.md",
+        "Mixed dtypes are rejected rather than applying implicit promotion.",
         "tests/test_documentation_contract.py::test_p0_tensor_product_dtype_contract",
     ),
     (
-        "docs/P0_COMPATIBILITY.md",
+        "docs/COMPATIBILITY.md",
         "With `normalize=True`, spherical harmonics return the normalized scalar for `l=0` and zeros for `l>0` at the zero vector.",
         "tests/test_documentation_contract.py::test_p0_spherical_harmonic_normalization_and_zero_contract",
     ),
     (
-        "docs/P0_COMPATIBILITY.md",
+        "docs/COMPATIBILITY.md",
         "`e3nn_core` remains importable without MLX.",
         "tests/test_nn_import_policy.py::test_nn_namespace_imports_without_site_packages",
     ),
@@ -322,11 +320,6 @@ DOCUMENTED_SOURCE_CONTRACTS = (
         "docs/examples/point_models.md",
         "The generic `radius_graph` helper computes Euclidean neighbors for the given coordinates and does not infer periodic images.",
         "tests/test_documentation_contract.py::test_documented_radius_graph_has_no_implicit_periodic_images",
-    ),
-    (
-        "docs/development/deployment.md",
-        "Pull requests build the site as a required-quality check but do not deploy it.",
-        "tests/test_documentation_contract.py::test_documentation_metadata_workflow_and_timing_contracts",
     ),
 )
 
