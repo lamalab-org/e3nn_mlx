@@ -34,6 +34,28 @@ output = tp(left_features, edge_attributes)
 Use {class}`~e3nn_mlx.o3.ElementwiseTensorProduct` for aligned channels and
 {class}`~e3nn_mlx.o3.TensorSquare` when both inputs are the same value.
 
+## Symmetry-reduced products
+
+{class}`~e3nn_mlx.o3.ReducedTensorProducts` constructs an orthonormal
+change-of-basis tensor subject to index permutation symmetries such as
+`"ij=ji"` or `"ijk=jik=ikj"`. Its `filter_ir_mid` argument restricts the
+irreps allowed at every sequential coupling stage; `filter_ir_out` restricts
+the retained final irreps. Intermediate filtering prunes contraction paths and
+is not equivalent to slicing an already-constructed output.
+
+```python
+lmax = 4
+bispectrum = o3.ReducedTensorProducts(
+    "ijk=jik=ikj",
+    i=o3.Irreps.spherical_harmonics(lmax),
+    filter_ir_mid=list(o3.Irrep.iterator(lmax=lmax)),
+    filter_ir_out=list(o3.Irrep.iterator(lmax=0)),
+)
+```
+
+This construction retains scalar symmetric triple contractions suitable for a
+bispectrum. 
+
 ## General instructions
 
 The general {class}`~e3nn_mlx.o3.TensorProduct` accepts an explicit output
