@@ -22,9 +22,15 @@ def test_spherical_tensor_plot_and_geometry_helpers() -> None:
 
     assert tensor.lmax == 3
     assert tensor.Rs == [(1, 0, 1), (1, 1, -1), (1, 2, 1), (1, 3, -1)]
-    assert surface.shape == (20, 20, 3)
-    assert values.shape == (20, 20)
+    assert surface.shape == (20, 21, 3)
+    assert values.shape == (20, 21)
     assert bool(mx.all(mx.isfinite(surface)))
+    assert _max_abs(surface[:, 0] - surface[:, -1]) < 2e-6
+
+    sphere, _ = tensor.plot(relu=False, radius=False, res=20)
+    assert _max_abs(sphere[:, 0] - sphere[:, -1]) < 2e-6
+    assert _max_abs(sphere[0] - mx.array([0.0, 1.0, 0.0])) < 2e-6
+    assert _max_abs(sphere[-1] - mx.array([0.0, -1.0, 0.0])) < 2e-6
 
     geometry = SphericalTensor.from_geometry(
         mx.array([[1.0, 1.0, 1.0], [1.0, -1.0, -1.0]]),

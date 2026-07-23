@@ -8,7 +8,7 @@ modern :mod:`e3nn_mlx.o3` implementation.
 
 from __future__ import annotations
 
-from math import isqrt
+from math import isqrt, pi, sqrt
 from typing import Any, Iterable
 
 import mlx.core as mx
@@ -165,20 +165,47 @@ class SphericalTensor(IrrepTensor):
             raise ValueError("plot expects one unbatched spherical tensor")
         if res <= 0:
             raise ValueError("res must be positive")
-        res_beta = max(2 * (self.lmax + 1), res + res % 2)
-        res_alpha = max(2 * self.lmax + 1, res)
-        transform = o3.ToS2Grid(
-            self.lmax,
-            (res_beta, res_alpha),
-            normalization=normalization,
+        resolution = max(2 * (self.lmax + 1), res, 2)
+        betas = mx.linspace(0.0, pi, resolution)
+        # Include both 0 and 2*pi. They represent the same meridian, but Plotly
+        # needs the duplicate column to close a Surface mesh.
+        alphas = mx.linspace(0.0, 2.0 * pi, resolution + 1)
+        harmonics = o3.spherical_harmonics_alpha_beta(
+            list(range(self.lmax + 1)),
+            alphas[None, :],
+            betas[:, None],
+            normalization="integral",
         )
-        values = transform(self.array)
+        if normalization == "component":
+            degree_scales = [
+                sqrt(4.0 * pi / (2 * degree + 1)) / sqrt(self.lmax + 1)
+                for degree in range(self.lmax + 1)
+            ]
+        elif normalization == "norm":
+            degree_scales = [
+                sqrt(4.0 * pi) / sqrt(self.lmax + 1)
+                for _ in range(self.lmax + 1)
+            ]
+        elif normalization == "integral":
+            degree_scales = [1.0 for _ in range(self.lmax + 1)]
+        else:
+            raise ValueError("normalization must be 'component', 'norm', or 'integral'")
+        scales = mx.array(
+            [
+                scale
+                for degree, scale in enumerate(degree_scales)
+                for _ in range(2 * degree + 1)
+            ],
+            dtype=self.array.dtype,
+        )
+        values = harmonics @ (self.array * scales)
+        grid = o3.angles_to_xyz(alphas[None, :], betas[:, None])
         colors = mx.maximum(values, 0.0) if relu else values
         if radius:
             radial = colors if relu else mx.abs(values)
-            surface = transform.grid * radial[..., None]
+            surface = grid * radial[..., None]
         else:
-            surface = transform.grid
+            surface = grid
         return surface, colors
 
 
