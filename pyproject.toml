@@ -43,7 +43,7 @@ dependencies = [
 [project.urls]
 Homepage = "https://github.com/lamalab-org/e3nn_mlx"
 Changelog = "https://github.com/lamalab-org/e3nn_mlx/blob/main/CHANGELOG.md"
-Documentation = "https://github.com/lamalab-org/e3nn_mlx/tree/main/docs"
+Documentation = "https://lamalab-org.github.io/e3nn_mlx/"
 Issues = "https://github.com/lamalab-org/e3nn_mlx/issues"
 Repository = "https://github.com/lamalab-org/e3nn_mlx.git"
 
@@ -65,8 +65,16 @@ release = [
   "twine>=6,<7",
 ]
 
+docs = [
+  "furo>=2024.8.6",
+  "myst-parser>=4,<5",
+  "sphinx>=8,<10",
+  "sphinx-copybutton>=0.5,<1",
+]
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
+testpaths = ["tests"]
 markers = [
   "mlx: requires a working MLX runtime",
   "metal: requires the MLX Metal backend on Apple Silicon",

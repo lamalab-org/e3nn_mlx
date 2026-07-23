@@ -11,8 +11,15 @@ def scatter_sum(
     dim_size: int | None = None,
     *,
     use_custom_kernel: bool = False,
+    jvp_safe: bool = False,
 ):
-    """Sum rows of ``source`` into output rows selected by one-dimensional ``index``."""
+    """Sum rows of ``source`` into rows selected by one-dimensional ``index``.
+
+    Set ``jvp_safe=True`` for forward-mode differentiation with respect to
+    ``source``.  This path requires eager, fixed indices and implements the
+    same reduction with a sorted prefix sum because MLX 0.31's indexed-add
+    primitive has no JVP rule.
+    """
 
     mx, _ = require_mlx()
     if source.ndim < 1:
@@ -25,6 +32,10 @@ def scatter_sum(
         dim_size = 0 if index.size == 0 else int(mx.max(index).item()) + 1
     if dim_size < 0:
         raise ValueError("dim_size must be non-negative")
+    if jvp_safe:
+        if use_custom_kernel:
+            raise ValueError("jvp_safe=True requires use_custom_kernel=False")
+        return _fixed_index_scatter_sum(source, index, dim_size)
     use_metal = (
         use_custom_kernel
         and mlx_metal_available()
@@ -49,6 +60,44 @@ def scatter_sum(
         return make_operation(index, dim_size, source.shape)(source)
     output = mx.zeros((dim_size, *source.shape[1:]), dtype=source.dtype)
     return output.at[index].add(source)
+
+
+def _fixed_index_scatter_sum(source, index, dim_size: int):
+    """Sparse JVP-safe scatter for an eager, fixed index array."""
+
+    mx, _ = require_mlx()
+    import numpy as np
+
+    try:
+        host_index = np.asarray(index)
+    except Exception as error:
+        raise RuntimeError(
+            "jvp_safe scatter requires an eager fixed index array"
+        ) from error
+    if host_index.size:
+        minimum = int(host_index.min())
+        maximum = int(host_index.max())
+        if minimum < 0 or maximum >= dim_size:
+            raise ValueError("index values must satisfy 0 <= index < dim_size")
+
+    order_host = np.argsort(host_index, kind="stable")
+    sorted_index = host_index[order_host]
+    rows = np.arange(dim_size, dtype=host_index.dtype)
+    starts_host = np.searchsorted(sorted_index, rows, side="left")
+    ends_host = np.searchsorted(sorted_index, rows, side="right")
+    order = mx.array(order_host, dtype=mx.int32)
+    starts = mx.array(starts_host, dtype=mx.int32)
+    ends = mx.array(ends_host, dtype=mx.int32)
+
+    sorted_source = source[order]
+    prefix = mx.concatenate(
+        (
+            mx.zeros((1, *source.shape[1:]), dtype=source.dtype),
+            mx.cumsum(sorted_source, axis=0),
+        ),
+        axis=0,
+    )
+    return prefix[ends] - prefix[starts]
 
 
 def radius_graph(positions, radius: float, batch=None):

@@ -1,0 +1,68 @@
+O(3) operations
+===============
+
+Representations
+---------------
+
+.. currentmodule:: e3nn_mlx.o3
+
+.. autosummary::
+   :toctree: generated
+
+   Irrep
+   MulIrrep
+   Irreps
+   Linear
+   Norm
+
+Tensor products
+---------------
+
+.. autosummary::
+   :toctree: generated
+
+   TensorProduct
+   FullyConnectedTensorProduct
+   FullTensorProduct
+   ElementwiseTensorProduct
+   TensorSquare
+   ReducedTensorProducts
+
+Spherical harmonics and grids
+-----------------------------
+
+.. autosummary::
+   :toctree: generated
+
+   spherical_harmonics
+   spherical_harmonics_alpha_beta
+   SphericalHarmonics
+   SphericalHarmonicsAlphaBeta
+   s2_grid
+   ToS2Grid
+   FromS2Grid
+   SO3Grid
+
+Rotations
+---------
+
+.. autosummary::
+   :toctree: generated
+
+   rand_angles
+   rand_matrix
+   rand_quaternion
+   rand_axis_angle
+   angles_to_matrix
+   matrix_to_angles
+   axis_angle_to_matrix
+   matrix_to_axis_angle
+   quaternion_to_matrix
+   matrix_to_quaternion
+   compose_angles
+   compose_quaternion
+   compose_axis_angle
+   wigner_d
+   irreps_wigner_d
+   irreps_wigner_d_from_matrix
+   wigner_3j

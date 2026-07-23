@@ -157,8 +157,9 @@ samples), the adapter and original paths were within measurement noise:
 | High-level compiled | 0.373 ms |
 
 These figures are a no-regression check, not a general performance claim. The
-cross-framework experiments in [`evals/`](../evals/README.md) remain the proper
-tool for model-scale measurements.
+cross-framework experiments in the repository's
+[`evals/` guide](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/README.md)
+remain the proper tool for model-scale measurements.
 
 ## Deliberate differences from PyTorch/e3nn
 
