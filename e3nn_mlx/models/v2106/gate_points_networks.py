@@ -58,7 +58,7 @@ class _PointNetworkBase(mlx_module_base()):
             edge_vectors,
             normalize=True,
             normalization="component",
-            use_custom_kernel=False,
+            use_custom_kernel=self.use_custom_kernel,
         )
         edge_lengths = mx.sqrt(mx.sum(edge_vectors * edge_vectors, axis=-1))
         edge_scalars = soft_one_hot_linspace(
@@ -75,7 +75,12 @@ class _PointNetworkBase(mlx_module_base()):
         if num_graphs < 0:
             raise ValueError("num_graphs must be non-negative")
         if self.pool_nodes:
-            pooled = scatter_sum(output.array, batch, num_graphs) / sqrt(self.num_nodes)
+            pooled = scatter_sum(
+                output.array,
+                batch,
+                num_graphs,
+                use_custom_kernel=self.use_custom_kernel,
+            ) / sqrt(self.num_nodes)
             return IrrepsArray(self.irreps_node_output, pooled)
         return output
 
@@ -103,6 +108,8 @@ class SimpleNetwork(_PointNetworkBase):
         layers: int = 3,
         lmax: int = 2,
         pool_nodes: bool = True,
+        *,
+        use_custom_kernel: bool = True,
     ) -> None:
         super().__init__()
         if max_radius <= 0 or num_neighbors <= 0 or num_nodes <= 0:
@@ -112,6 +119,7 @@ class SimpleNetwork(_PointNetworkBase):
         self.max_radius = float(max_radius)
         self.num_nodes = float(num_nodes)
         self.pool_nodes = bool(pool_nodes)
+        self.use_custom_kernel = bool(use_custom_kernel)
         self.lmax = int(lmax)
         self.irreps_sh = Irreps.spherical_harmonics(self.lmax)
         self._config = {
@@ -124,6 +132,7 @@ class SimpleNetwork(_PointNetworkBase):
             "layers": int(layers),
             "lmax": self.lmax,
             "pool_nodes": self.pool_nodes,
+            "use_custom_kernel": self.use_custom_kernel,
         }
         hidden = _hidden_irreps(int(mul), self.lmax)
         self.mp = MessagePassing(
@@ -136,6 +145,7 @@ class SimpleNetwork(_PointNetworkBase):
             self.irreps_sh,
             [self.number_of_basis, 100],
             num_neighbors,
+            use_custom_kernel=self.use_custom_kernel,
         )
         self.irreps_in = self.mp.irreps_node_input
         self.irreps_out = self.mp.irreps_node_output
@@ -222,6 +232,8 @@ class NetworkForAGraphWithAttributes(_PointNetworkBase):
         layers: int = 3,
         lmax: int = 2,
         pool_nodes: bool = True,
+        *,
+        use_custom_kernel: bool = True,
     ) -> None:
         super().__init__()
         if max_radius <= 0 or num_neighbors <= 0 or num_nodes <= 0:
@@ -231,6 +243,7 @@ class NetworkForAGraphWithAttributes(_PointNetworkBase):
         self.max_radius = float(max_radius)
         self.num_nodes = float(num_nodes)
         self.pool_nodes = bool(pool_nodes)
+        self.use_custom_kernel = bool(use_custom_kernel)
         self.lmax = int(lmax)
         self.irreps_edge_attr = Irreps(irreps_edge_attr).remove_zero_multiplicities()
         self.irreps_sh = Irreps.spherical_harmonics(self.lmax)
@@ -247,6 +260,7 @@ class NetworkForAGraphWithAttributes(_PointNetworkBase):
             "layers": int(layers),
             "lmax": self.lmax,
             "pool_nodes": self.pool_nodes,
+            "use_custom_kernel": self.use_custom_kernel,
         }
         hidden = _hidden_irreps(int(mul), self.lmax)
         self.mp = MessagePassing(
@@ -259,6 +273,7 @@ class NetworkForAGraphWithAttributes(_PointNetworkBase):
             self.irreps_edge_attr_combined,
             [self.number_of_basis, 100],
             num_neighbors,
+            use_custom_kernel=self.use_custom_kernel,
         )
         self.irreps_node_input = self.mp.irreps_node_input
         self.irreps_node_attr = self.mp.irreps_node_attr

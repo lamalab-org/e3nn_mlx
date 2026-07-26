@@ -159,7 +159,12 @@ class Convolution(mlx_module_base()):
             gathered = IrrepsArray(self.tp.irreps_in1, transformed.array[edge_src])
             tp_edge_attr = IrrepsArray(self.tp.irreps_in2, edge_attr.array)
             messages = self.tp(gathered, tp_edge_attr, weights)
-            aggregated = scatter_sum(messages.array, edge_dst, node_input.shape[0])
+            aggregated = scatter_sum(
+                messages.array,
+                edge_dst,
+                node_input.shape[0],
+                use_custom_kernel=self.use_custom_kernel,
+            )
         aggregated = aggregated / sqrt(self.num_neighbors)
 
         middle = IrrepsArray(self.irreps_mid, aggregated)
