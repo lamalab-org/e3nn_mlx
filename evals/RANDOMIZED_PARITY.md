@@ -1,4 +1,64 @@
-# Randomized TensorProduct parity qualification
+# Randomized numerical parity qualification
+
+Two complementary harnesses compare identical NumPy-generated values in
+isolated Torch/e3nn and MLX workers:
+
+- `randomized_tensor_product_parity.py` deeply explores explicit tensor-product
+  structures and weight layouts.
+- `randomized_core_parity.py` covers the other important operations with a
+  unique elementwise cross-framework convention.
+
+## Core-operation qualification
+
+The core harness randomizes:
+
+- Wigner 3-j coefficients and batched rotation/Wigner-D matrices;
+- spherical-harmonic degrees, normalization, coordinate normalization, input
+  rank, and custom-kernel eligibility;
+- Linear irreps, explicit connection topology, normalization, shared and
+  broadcast per-sample weights, external biases, and MLX compilation;
+- Norm and NormActivation irreps, multiplicities, batches, squared norms, and
+  normalization;
+- upstream-style Gate scalar/gate/gated representations and activations;
+- every radial basis, cutoff mode, interval, basis count, and input layout;
+- scatter topology, edge count, feature width, empty inputs, and custom versus
+  general aggregation;
+- FullTensorProduct, FullyConnectedTensorProduct,
+  ElementwiseTensorProduct, and TensorSquare wrappers;
+- S2 and SO3 activation bandwidths, resolutions, normalizations supported by
+  both implementations, and batch sizes.
+
+Run the default set:
+
+```bash
+.venv/bin/python evals/randomized_core_parity.py \
+  --cases-per-family 12 --seed 20260727 --max-l 4
+```
+
+Run a larger set or select individual families:
+
+```bash
+.venv/bin/python evals/randomized_core_parity.py \
+  --cases-per-family 100 --seed 20260727 --max-l 6 \
+  --family spherical_harmonics \
+  --family linear \
+  --family gate \
+  --torch-python evals/.venv-torch/bin/python \
+  --mlx-python .venv/bin/python
+```
+
+Its results are written under
+`evals/results/core-randomized/<timestamp>/` using the same cases, worker,
+report, failure, and replay structure described below. Replay a failure with
+`randomized_core_parity.py --replay <failure.json>`.
+
+`ReducedTensorProducts` is intentionally not compared by raw output
+coordinates: a valid reduced basis is only defined up to sign and orthogonal
+mixing within repeated channels. Its deterministic tests instead verify
+orthonormality, permutation symmetries, equivariance, filtering, and direct
+contraction identities. Complete graph-network and MACE tests also retain
+fixed structures and identical named parameters; randomly generating whole
+model architectures would test a different contract than operator parity.
 
 `randomized_tensor_product_parity.py` generates seeded NumPy values and feeds
 the identical arrays to pinned Torch/e3nn and e3nn-mlx workers. The workers run
@@ -8,7 +68,7 @@ test dependencies.
 This complements the committed golden fixtures. Golden fixtures provide a
 stable release contract; this harness explores a much larger structural space.
 
-## What is randomized
+## TensorProduct qualification
 
 Each valid case varies:
 
