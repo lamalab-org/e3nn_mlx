@@ -38,10 +38,10 @@ Use {class}`~e3nn_mlx.o3.ElementwiseTensorProduct` for aligned channels and
 
 {class}`~e3nn_mlx.o3.ReducedTensorProducts` constructs an orthonormal
 change-of-basis tensor subject to index permutation symmetries such as
-`"ij=ji"` or `"ijk=jik=ikj"`. Its `filter_ir_mid` argument restricts the
-irreps allowed at every sequential coupling stage; `filter_ir_out` restricts
-the retained final irreps. Intermediate filtering prunes contraction paths and
-is not equivalent to slicing an already-constructed output.
+`"ij=ji"` or `"ijk=jik=ikj"`. `filter_ir_mid` restricts every sequential
+Clebsch--Gordan coupling, including the final coupling. `filter_ir_out`
+restricts the retained final irreps. Intermediate filtering prunes contraction
+paths and is not equivalent to slicing an already-constructed output.
 
 ```python
 lmax = 4

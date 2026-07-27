@@ -2,7 +2,7 @@
 
 
 import ase
-from ase import visualize, io
+from ase import visualize
 
 from e3nn_mlx import o3
 
@@ -15,6 +15,11 @@ import plotly.express as px
 from scipy.spatial.transform import Rotation
 
 import mlx.core as mx
+
+try:
+    from .tensor_helpers import SphericalTensor
+except ImportError:
+    from tensor_helpers import SphericalTensor
 
 
 
@@ -137,20 +142,6 @@ def trace(r, f, c, radial_abs=True):
         surfacecolor=f,
     )
 
-def plot(data, radial_abs=True):
-    data=np.asarray(data)
-    r = s2_grid()
-    r=np.asarray(r)
-    n = data.shape[-1]
-    traces = [
-        trace(r, data[..., i], mx.array([2.0 * i - (n - 1.0), 0.0, 0.0]), radial_abs=radial_abs)
-        for i in range(n)
-    ]
-    cmax = max(d['surfacecolor'].abs().max().item() for d in traces)
-    traces = [go.Surface(**d, colorscale='RdBu', cmin=-cmax, cmax=cmax) for d in traces]
-    fig = go.Figure(data=traces, layout=layout)
-    fig.show()
-
 def plot_sphere(r):
     r=np.asarray(r)
     fig = go.Figure(
@@ -200,10 +191,9 @@ def plot_sphere(r):
 
 def random_point_signal(lmax, N=5, r_min=1e-1, std=1.):
     n = N
-    points = mx.norm.random(n, 3) * std / mx.sqrt(3.)
-    points /= points.norm(2, -1, keepdim=True)
-#     select = (points.norm(2, -1) > r_min).nonzero()
-    return io.SphericalTensor(lmax, p_val=1, p_arg=-1).from_geometry_adjusted(points)
+    points = mx.random.normal(shape=(n, 3)) * std / mx.sqrt(3.)
+    points /= mx.linalg.norm(points, axis=-1, keepdims=True)
+    return SphericalTensor.from_geometry(points, lmax)
 
 
 

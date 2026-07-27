@@ -107,6 +107,39 @@ def test_upstream_reduced_tensor_change_of_basis_is_orthonormal_and_compilable()
 @pytest.mark.mlx
 def test_upstream_reduced_tensor_supports_intermediate_and_output_filters() -> None:
     mx = mlx_backend._require()
+    with pytest.raises(ValueError, match="filter_ir_mid"):
+        o3.ReducedTensorProducts(
+            "ijk=jik=ikj",
+            i="1e",
+            filter_ir_mid=["not-an-irrep"],
+        )
+    with pytest.raises(ValueError, match="filter_ir_out"):
+        o3.ReducedTensorProducts(
+            "ijk=jik=ikj",
+            i="1e",
+            filter_ir_out=["not-an-irrep"],
+        )
+
+    mid_only = o3.ReducedTensorProducts(
+        "ijk=jik=ikj",
+        i="1e",
+        filter_ir_mid=["0e", "1e", "2e"],
+    )
+    assert mid_only.filter_ir_out is None
+    assert mid_only.filter_ir_mid == tuple(
+        o3.Irrep.parse(value) for value in ("0e", "1e", "2e")
+    )
+    assert mid_only.irreps_out == o3.Irreps("1e")
+
+    out_only = o3.ReducedTensorProducts(
+        "ijk=jik=ikj",
+        i="1e",
+        filter_ir_out=["1e"],
+    )
+    assert out_only.filter_ir_mid is None
+    assert out_only.filter_ir_out == (o3.Irrep("1e"),)
+    assert out_only.irreps_out == o3.Irreps("1e")
+
     irreps = o3.Irreps.spherical_harmonics(4)
     allowed_mid = list(o3.Irrep.iterator(lmax=4))
     allowed_out = list(o3.Irrep.iterator(lmax=0))
