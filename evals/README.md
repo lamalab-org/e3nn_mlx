@@ -80,6 +80,11 @@ PyTorch 2.7.1 and e3nn 0.5.8. The JSON metadata records the versions actually
 used, so experimenting with a newer PyTorch wheel does not silently invalidate
 comparisons.
 
+For seeded numerical qualification across randomized irreps, instruction
+topologies, connection modes, multiplicities, weight layouts, broadcasting,
+and MLX execution paths, see
+[RANDOMIZED_PARITY.md](RANDOMIZED_PARITY.md).
+
 ## Quick smoke comparison
 
 Run all small cases on MLX GPU and PyTorch MPS, then generate plots:
