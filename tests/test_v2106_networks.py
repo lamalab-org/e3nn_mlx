@@ -11,6 +11,7 @@ tree_flatten = mlx_utils.tree_flatten
 tree_map = mlx_utils.tree_map
 
 import e3nn_mlx as e3nn
+import e3nn_mlx.models.v2106.gate_points_networks as network_module
 from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx.compat import require_mlx
 from e3nn_mlx.models.v2106 import (
@@ -144,6 +145,107 @@ def test_v2106_exact_upstream_network_configurations_construct_and_run() -> None
     assert e3nn.NetworkForAGraphWithAttributes is NetworkForAGraphWithAttributes
     assert tree_flatten(simple.parameters())
     assert tree_flatten(attributed.parameters())
+
+
+@pytest.mark.mlx
+@pytest.mark.parametrize("enabled", [False, True])
+def test_v2106_network_propagates_kernel_mode_to_geometry_pooling_and_layers(
+    enabled, monkeypatch
+) -> None:
+    mx = mlx_backend._require()
+    harmonic_calls = []
+    scatter_calls = []
+    original_harmonics = network_module.spherical_harmonics
+    original_scatter_sum = network_module.scatter_sum
+
+    def recording_harmonics(*args, use_custom_kernel=True, **kwargs):
+        harmonic_calls.append(use_custom_kernel)
+        return original_harmonics(*args, use_custom_kernel=False, **kwargs)
+
+    def recording_scatter_sum(
+        source, index, dim_size, *, use_custom_kernel=False, jvp_safe=False
+    ):
+        scatter_calls.append(use_custom_kernel)
+        return original_scatter_sum(
+            source,
+            index,
+            dim_size,
+            use_custom_kernel=False,
+            jvp_safe=jvp_safe,
+        )
+
+    monkeypatch.setattr(network_module, "spherical_harmonics", recording_harmonics)
+    monkeypatch.setattr(network_module, "scatter_sum", recording_scatter_sum)
+    module = SimpleNetwork(
+        "0e",
+        "0e",
+        max_radius=2.0,
+        num_neighbors=2.0,
+        num_nodes=2.0,
+        mul=2,
+        layers=1,
+        lmax=2,
+        use_custom_kernel=enabled,
+    )
+    convolutions = [
+        layer.first if isinstance(layer, Compose) else layer for layer in module.mp.layers
+    ]
+    assert module.use_custom_kernel is enabled
+    assert module.mp.use_custom_kernel is enabled
+    assert all(layer.use_custom_kernel is enabled for layer in convolutions)
+
+    positions = mx.array([[0.0, 0.0, 0.0], [0.5, 0.0, 0.0]])
+    edge_src = mx.array([0, 1], dtype=mx.int32)
+    edge_dst = mx.array([1, 0], dtype=mx.int32)
+    module._edge_geometry(positions, edge_src, edge_dst)
+    module._finish(
+        e3nn.IrrepsArray(module.irreps_node_output, mx.ones((2, 1))),
+        mx.array([0, 0], dtype=mx.int32),
+        1,
+    )
+    assert harmonic_calls == [enabled]
+    assert scatter_calls == [enabled]
+    assert copy.deepcopy(module).use_custom_kernel is enabled
+
+
+@pytest.mark.mlx
+def test_v2106_network_kernel_modes_are_numerically_equivalent() -> None:
+    mx = mlx_backend._require()
+    options = {
+        "irreps_in": "2x0e + 1o",
+        "irreps_out": "2x0e + 1o",
+        "max_radius": 2.0,
+        "num_neighbors": 3.0,
+        "num_nodes": 5.0,
+        "mul": 3,
+        "layers": 1,
+        "lmax": 2,
+    }
+    general = SimpleNetwork(**options, use_custom_kernel=False)
+    kernel = SimpleNetwork(**options, use_custom_kernel=True)
+    kernel.update(general.parameters())
+    positions = _positions()
+    node_input = mx.random.normal(shape=(positions.shape[0], general.irreps_in.dim))
+    batch = mx.zeros((positions.shape[0],), dtype=mx.int32)
+    edges = e3nn.radius_graph(positions, general.max_radius, batch)
+    expected = general.forward_with_edges(
+        positions,
+        node_input,
+        batch,
+        edges[0],
+        edges[1],
+        num_graphs=1,
+    ).array
+    actual = kernel.forward_with_edges(
+        positions,
+        node_input,
+        batch,
+        edges[0],
+        edges[1],
+        num_graphs=1,
+    ).array
+    mx.eval(expected, actual)
+    assert _max_abs(actual - expected) < 3e-4
 
 
 @pytest.mark.mlx

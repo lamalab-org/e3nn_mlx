@@ -7,6 +7,7 @@ import pytest
 tree_flatten = pytest.importorskip("mlx.utils").tree_flatten
 
 import e3nn_mlx as e3nn
+import e3nn_mlx.models.v2106.points_convolution as convolution_module
 from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx.compat import require_mlx
 from e3nn_mlx.models.v2106.points_convolution import Convolution
@@ -65,6 +66,50 @@ def test_v2106_convolution_construction_scalar_path_and_zero_alpha_initializatio
     assert _max_abs(output - self_connection) < 3e-5
     assert output.shape == (4, module.irreps_node_output.dim)
     assert bool(mx.all(module.alpha.output_mask))
+
+
+@pytest.mark.mlx
+@pytest.mark.parametrize("enabled", [False, True])
+def test_v2106_convolution_propagates_kernel_mode_to_tensor_products_and_scatter(
+    enabled, monkeypatch
+) -> None:
+    calls = []
+    original_scatter_sum = convolution_module.scatter_sum
+
+    def recording_scatter_sum(
+        source, index, dim_size, *, use_custom_kernel=False, jvp_safe=False
+    ):
+        calls.append(use_custom_kernel)
+        return original_scatter_sum(
+            source,
+            index,
+            dim_size,
+            use_custom_kernel=False,
+            jvp_safe=jvp_safe,
+        )
+
+    monkeypatch.setattr(convolution_module, "scatter_sum", recording_scatter_sum)
+    module = Convolution(
+        "2x0e + 1e",
+        "0e + 1e",
+        "0e + 1e",
+        "2x0e + 1e + 1o",
+        [4, 16],
+        3.0,
+        use_custom_kernel=enabled,
+    )
+    assert all(
+        tensor_product.use_custom_kernel is enabled
+        for tensor_product in (
+            module.sc,
+            module.lin1,
+            module.tp,
+            module.lin2,
+            module.alpha,
+        )
+    )
+    module.forward_arrays(*_inputs(module))
+    assert calls == [enabled]
 
 
 @pytest.mark.mlx

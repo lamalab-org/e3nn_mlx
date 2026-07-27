@@ -150,3 +150,62 @@ def test_torch_both_expands_to_isolated_mps_and_cpu_workers(tmp_path) -> None:
         torch_device="cpu",
     )
     assert command[command.index("--device") + 1] == "cpu"
+
+
+@pytest.mark.mlx
+@pytest.mark.parametrize("enabled", [False, True])
+def test_v2106_mlx_builders_pass_selected_kernel_mode(enabled, monkeypatch) -> None:
+    from evals import mlx_cases
+    from e3nn_mlx.models.v2106 import (
+        Convolution,
+        MessagePassing,
+        NetworkForAGraphWithAttributes,
+    )
+
+    seen = {"convolution": [], "message_passing": [], "network": []}
+
+    def record_init(kind, original):
+        def wrapped(instance, *args, **kwargs):
+            seen[kind].append(kwargs.get("use_custom_kernel"))
+            original(instance, *args, **kwargs)
+
+        return wrapped
+
+    monkeypatch.setattr(
+        Convolution,
+        "__init__",
+        record_init("convolution", Convolution.__init__),
+    )
+    monkeypatch.setattr(
+        MessagePassing,
+        "__init__",
+        record_init("message_passing", MessagePassing.__init__),
+    )
+    monkeypatch.setattr(
+        NetworkForAGraphWithAttributes,
+        "__init__",
+        record_init("network", NetworkForAGraphWithAttributes.__init__),
+    )
+    mlx_cases.configure(use_custom_kernels=enabled)
+    try:
+        workloads = get_workloads(
+            "smoke",
+            ["v2106_convolution", "v2106_message_passing", "v2106_network"],
+        )
+
+        mlx_cases.build_v2106_convolution(workloads["v2106_convolution"])
+        assert seen["convolution"] == [enabled]
+
+        seen["convolution"].clear()
+        mlx_cases.build_v2106_message_passing(workloads["v2106_message_passing"])
+        assert seen["message_passing"] == [enabled]
+        assert seen["convolution"] and set(seen["convolution"]) == {enabled}
+
+        seen["convolution"].clear()
+        seen["message_passing"].clear()
+        mlx_cases.build_v2106_network(workloads["v2106_network"])
+        assert seen["network"] == [enabled]
+        assert seen["message_passing"] == [enabled]
+        assert seen["convolution"] and set(seen["convolution"]) == {enabled}
+    finally:
+        mlx_cases.configure(use_custom_kernels=True)

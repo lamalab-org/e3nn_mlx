@@ -16,6 +16,10 @@ that is not covered by the public API below.
 
 - New to equivariance? Read [Irreducible representations](guide/irreps.md),
   then work through the [first equivariant operation](examples/getting_started.md).
+- Prefer notebook-based introductions? Explore the
+  [adapted historical e3nn tutorials](https://github.com/lamalab-org/e3nn_mlx/tree/main/tutorials)
+  on tensor types, spherical-tensor operations, and invariant atomic
+  descriptors.
 - Coming from e3nn/PyTorch? Start with the [migration guide](guide/migration.md).
 - Building a model? See [tensor products](guide/tensor_products.md), the
   [convolution example](examples/convolution.md), and [point models](examples/point_models.md).

@@ -39,6 +39,8 @@ class MessagePassing(mlx_module_base()):
         irreps_edge_attr,
         fc_neurons,
         num_neighbors: float,
+        *,
+        use_custom_kernel: bool = True,
     ) -> None:
         super().__init__()
         requested_sequence = tuple(
@@ -54,12 +56,14 @@ class MessagePassing(mlx_module_base()):
         if num_neighbors <= 0:
             raise ValueError("num_neighbors must be positive")
         self.num_neighbors = float(num_neighbors)
+        self.use_custom_kernel = bool(use_custom_kernel)
         self._config = {
             "irreps_node_sequence": requested_sequence,
             "irreps_node_attr": self.irreps_node_attr,
             "irreps_edge_attr": self.irreps_edge_attr,
             "fc_neurons": self.fc_neurons,
             "num_neighbors": self.num_neighbors,
+            "use_custom_kernel": self.use_custom_kernel,
         }
 
         mx, _ = require_mlx()
@@ -107,6 +111,7 @@ class MessagePassing(mlx_module_base()):
                 gate.irreps_in,
                 self.fc_neurons,
                 self.num_neighbors,
+                use_custom_kernel=self.use_custom_kernel,
             )
             modules.append(Compose(convolution, gate))
             current = gate.irreps_out
@@ -121,6 +126,7 @@ class MessagePassing(mlx_module_base()):
                 output,
                 self.fc_neurons,
                 self.num_neighbors,
+                use_custom_kernel=self.use_custom_kernel,
             )
         )
         actual_sequence.append(output)

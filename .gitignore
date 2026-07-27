@@ -12,3 +12,4 @@ dev_notes/
 .DS_Store
 evals/.venv-torch/
 evals/results/
+.venv_tutorials

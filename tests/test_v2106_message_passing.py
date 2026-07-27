@@ -69,6 +69,27 @@ def test_v2106_message_passing_upstream_configuration_and_path_filtering() -> No
 
 
 @pytest.mark.mlx
+@pytest.mark.parametrize("enabled", [False, True])
+def test_v2106_message_passing_propagates_kernel_mode_and_preserves_it_on_copy(
+    enabled,
+) -> None:
+    module = MessagePassing(
+        ["0e", "0e + 1e", "1e"],
+        "0e",
+        "0e + 1e",
+        [2, 8],
+        3.0,
+        use_custom_kernel=enabled,
+    )
+    convolutions = [
+        layer.first if isinstance(layer, Compose) else layer for layer in module.layers
+    ]
+    assert module.use_custom_kernel is enabled
+    assert all(layer.use_custom_kernel is enabled for layer in convolutions)
+    assert copy.deepcopy(module).use_custom_kernel is enabled
+
+
+@pytest.mark.mlx
 def test_v2106_message_passing_o3_equivariance_with_all_alpha_branches_active() -> None:
     mx = mlx_backend._require()
     module = _module()

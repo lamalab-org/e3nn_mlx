@@ -384,6 +384,7 @@ def build_v2106_convolution(config: dict[str, Any]) -> Task:
         irreps_node,
         [config["radial"], config["radial_hidden"]],
         float(config["neighbors"]),
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
     module.alpha.update({"weight": 0.05 * mx.random.normal(shape=module.alpha.weight.shape)})
     node_input = mx.random.normal(shape=(config["nodes"], module.irreps_node_input.dim))
@@ -420,6 +421,7 @@ def build_v2106_message_passing(config: dict[str, Any]) -> Task:
         irreps_edge,
         [config["radial"], config["radial_hidden"]],
         float(config["neighbors"]),
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
     _activate_alpha(module)
     node_input = mx.random.normal(shape=(config["nodes"], module.irreps_node_input.dim))
@@ -462,6 +464,7 @@ def build_v2106_network(config: dict[str, Any]) -> Task:
         layers=config["layers"],
         lmax=config["lmax"],
         pool_nodes=True,
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
     _activate_alpha(module)
     positions = mx.random.normal(shape=(config["nodes"], 3))
