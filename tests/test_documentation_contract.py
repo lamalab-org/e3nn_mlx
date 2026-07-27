@@ -330,6 +330,11 @@ DOCUMENTED_SOURCE_CONTRACTS = (
         "tests/test_tensor_product_compatibility_qualification.py::test_shared_tensor_product_weights_are_not_materialized_per_item",
     ),
     (
+        "docs/guide/performance.md",
+        "The shipped `gate_points_2102` model currently has no model-level kernel toggle",
+        "tests/test_evals.py::test_model_benchmarks_report_kernel_scope",
+    ),
+    (
         "evals/README.md",
         "Every result row also records the selected execution path.",
         "tests/test_evals.py::test_mlx_benchmark_reports_actual_tensor_product_dispatch",

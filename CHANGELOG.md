@@ -28,8 +28,15 @@ follow [Semantic Versioning](https://semver.org/).
   compare identical NumPy-generated inputs, forward values, and VJPs.
 - Consolidate performance evaluation into one three-way Torch-CPU,
   general-MLX, and kernel-MLX suite with smoke and full presets.
+- Add matched end-to-end benchmarks for gate-points 2102, v2106 simple, and
+  v2106 attributed networks on deterministic fixed graph topology.
 - Record the actually selected MLX execution path in performance artifacts so
   automatic kernel fallbacks remain distinguishable from kernel dispatches.
+
+### Documentation
+
+- Document generated-kernel shape, dtype, dispatch, differentiation, model,
+  fusion, and startup-cost limitations.
 
 ## 0.1.0
 

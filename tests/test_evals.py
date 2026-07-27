@@ -10,7 +10,7 @@ from evals.common import SCHEMA_VERSION, load_documents, summarize, write_docume
 from evals.plot_results import main as plot_main, speedup_entries
 from evals.run import WORKERS, parse_args, worker_command
 from evals.run_backend import apply_overrides, parse_args as parse_worker_args
-from evals.workloads import case_names, get_workloads, spherical_irreps
+from evals.workloads import case_names, get_workloads, ring_edges, spherical_irreps
 
 
 def _row(backend, median, *, phase="forward"):
@@ -46,10 +46,16 @@ def test_statistics_and_workload_surface_are_small_and_fixed() -> None:
         "weighted_tensor_product_uvu",
         "linear",
         "scatter_sum",
+        "gate_points_2102",
+        "v2106_simple_network",
+        "v2106_attributed_network",
     }
     assert set(get_workloads("smoke")) == set(case_names())
     assert set(get_workloads("full")) == set(case_names())
     assert spherical_irreps(3, 2) == "3x0e + 3x1o + 3x2e"
+    source, destination = ring_edges(4, 2)
+    assert len(source) == len(destination) == 8
+    assert all(left != right for left, right in zip(source, destination, strict=True))
     with pytest.raises(ValueError, match="unknown preset"):
         get_workloads("medium")
 
@@ -152,6 +158,28 @@ def test_backend_builders_match_the_documented_case_set() -> None:
 
     assert tuple(mlx_cases.BUILDERS) == case_names()
     assert tuple(torch_cases.BUILDERS) == case_names()
+
+
+@pytest.mark.mlx
+def test_model_benchmarks_report_kernel_scope() -> None:
+    from evals import mlx_cases
+
+    config = {
+        "nodes": 8,
+        "neighbors": 2,
+        "mul": 2,
+        "layers": 1,
+        "lmax": 1,
+    }
+    mlx_cases.configure(use_custom_kernels=True)
+    gate = mlx_cases.build_gate_points_2102(config)
+    simple = mlx_cases.build_v2106_simple_network(config)
+    attributed = mlx_cases.build_v2106_attributed_network(config)
+    mlx_cases.configure(use_custom_kernels=False)
+
+    assert gate.dispatch == "general-mlx (model has no kernel toggle)"
+    assert simple.dispatch == "mixed-model-kernels"
+    assert attributed.dispatch == "mixed-model-kernels"
 
 
 @pytest.mark.mlx

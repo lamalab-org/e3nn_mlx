@@ -7,7 +7,7 @@ import os
 from typing import Any, Callable
 
 from .common import Task
-from .workloads import CASE_DESCRIPTIONS, spherical_irreps
+from .workloads import CASE_DESCRIPTIONS, ring_edges, spherical_irreps
 
 
 _THREADS = max(1, os.cpu_count() or 1)
@@ -250,6 +250,148 @@ def build_scatter_sum(config: dict[str, Any]) -> Task:
     )
 
 
+def _model_graph(config, *, input_dim, node_attr_dim=0, edge_attr_dim=0):
+    torch, _ = _imports()
+    source, destination = ring_edges(config["nodes"], config["neighbors"])
+    positions = 0.25 * torch.randn(config["nodes"], 3)
+    node_input = torch.randn(config["nodes"], input_dim)
+    node_attr = (
+        torch.randn(config["nodes"], node_attr_dim) if node_attr_dim else None
+    )
+    edge_attr = (
+        torch.randn(len(source), edge_attr_dim) if edge_attr_dim else None
+    )
+    batch = torch.zeros(config["nodes"], dtype=torch.long)
+    edge_index = torch.tensor([source, destination], dtype=torch.long)
+    return positions, node_input, node_attr, edge_attr, batch, edge_index
+
+
+def build_gate_points_2102(config: dict[str, Any]) -> Task:
+    torch, o3 = _imports()
+    import e3nn.nn.models.gate_points_2102 as model_module
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_hidden = " + ".join(
+        f"{config['mul']}x{degree}{parity}"
+        for degree in range(config["lmax"] + 1)
+        for parity in ("e", "o")
+    )
+    module = model_module.Network(
+        irreps_in,
+        irreps_hidden,
+        "1x0e",
+        irreps_node_attr,
+        o3.Irreps.spherical_harmonics(config["lmax"]),
+        layers=config["layers"],
+        max_radius=2.0,
+        number_of_basis=8,
+        radial_layers=2,
+        radial_neurons=max(16, 4 * config["mul"]),
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        reduce_output=True,
+    )
+    positions, node_input, node_attr, _, batch, edge_index = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+    )
+    model_module.radius_graph = lambda _pos, _radius, _batch: edge_index
+    data = {
+        "pos": positions,
+        "x": node_input,
+        "z": node_attr,
+        "batch": batch,
+    }
+    forward = lambda: module(data)
+    return _task(
+        name="gate_points_2102",
+        config=config,
+        item_count=config["nodes"],
+        forward=forward,
+        train=_module_train(module, forward),
+    )
+
+
+def build_v2106_simple_network(config: dict[str, Any]) -> Task:
+    torch, o3 = _imports()
+    import e3nn.nn.models.v2106.gate_points_networks as model_module
+
+    irreps_in = o3.Irreps("4x0e")
+    module = model_module.SimpleNetwork(
+        irreps_in,
+        "1x0e",
+        max_radius=2.0,
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        mul=config["mul"],
+        layers=config["layers"],
+        lmax=config["lmax"],
+        pool_nodes=True,
+    )
+    positions, node_input, _, _, batch, edge_index = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+    )
+    model_module.radius_graph = lambda _pos, _radius, _batch: edge_index
+    data = {"pos": positions, "x": node_input, "batch": batch}
+    forward = lambda: module(data)
+    return _task(
+        name="v2106_simple_network",
+        config=config,
+        item_count=config["nodes"],
+        forward=forward,
+        train=_module_train(module, forward),
+    )
+
+
+def build_v2106_attributed_network(config: dict[str, Any]) -> Task:
+    torch, o3 = _imports()
+    from e3nn.nn.models.v2106.gate_points_networks import (
+        NetworkForAGraphWithAttributes,
+    )
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_edge_attr = o3.Irreps("2x0e")
+    module = NetworkForAGraphWithAttributes(
+        irreps_in,
+        irreps_node_attr,
+        irreps_edge_attr,
+        "1x0e",
+        max_radius=2.0,
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        mul=config["mul"],
+        layers=config["layers"],
+        lmax=config["lmax"],
+        pool_nodes=True,
+    )
+    positions, node_input, node_attr, edge_attr, batch, edge_index = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+        edge_attr_dim=irreps_edge_attr.dim,
+    )
+    data = {
+        "pos": positions,
+        "node_input": node_input,
+        "node_attr": node_attr,
+        "edge_attr": edge_attr,
+        "edge_index": edge_index,
+        "batch": batch,
+    }
+    forward = lambda: module(data)
+    return _task(
+        name="v2106_attributed_network",
+        config=config,
+        item_count=config["nodes"],
+        forward=forward,
+        train=_module_train(module, forward),
+    )
+
+
 BUILDERS = {
     "spherical_harmonics": build_spherical_harmonics,
     "full_tensor_product": build_full_tensor_product,
@@ -257,4 +399,7 @@ BUILDERS = {
     "weighted_tensor_product_uvu": build_weighted_tensor_product_uvu,
     "linear": build_linear,
     "scatter_sum": build_scatter_sum,
+    "gate_points_2102": build_gate_points_2102,
+    "v2106_simple_network": build_v2106_simple_network,
+    "v2106_attributed_network": build_v2106_attributed_network,
 }

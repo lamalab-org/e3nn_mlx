@@ -14,8 +14,10 @@ The performance runner always launches exactly these isolated workers:
 | `mlx` | compiled e3nn-mlx with generated kernels disabled |
 | `mlx-kernel` | compiled e3nn-mlx with generated kernels enabled |
 
-There is no MPS mode, Torch compilation mode, MACE suite, or model-specific
-benchmark in this directory.
+There is no MPS mode, Torch compilation mode, MACE/ASE suite, or relaxation
+benchmark in this directory. The model cases below exercise the three
+end-to-end point-network families shipped by e3nn-mlx and their exact upstream
+e3nn counterparts.
 
 ## Setup
 
@@ -81,9 +83,31 @@ Settings can be overridden without editing source:
 | `weighted_tensor_product_uvu` | Per-item learned contraction used by message passing |
 | `linear` | Equivariant multiplicity mixing and non-kernel control |
 | `scatter_sum` | Graph message aggregation |
+| `gate_points_2102` | February 2021 gated point-cloud network |
+| `v2106_simple_network` | v2106 geometric message-passing network |
+| `v2106_attributed_network` | v2106 network with node and edge attributes |
 
 The `linear` result is deliberately a control: it has no generated kernel, so
 the two MLX workers should agree up to ordinary timing noise.
+
+The model cases use the same architecture, dimensions, node count, and
+deterministic directed graph in upstream e3nn and e3nn-mlx. Fixed topology
+keeps neighbor-search implementation out of the measurement; geometry,
+spherical harmonics, radial networks, tensor-product messages, aggregation,
+gates, and pooling remain inside it. “Training” measures a loss plus gradients
+with respect to every model parameter, without an optimizer update. The two
+implementations initialize weights independently, so these cases measure
+equivalent workloads rather than checkpoint-level output parity; numerical
+model behavior is covered by the repository test suite.
+
+Run only the end-to-end models with:
+
+```bash
+.venv/bin/python evals/run.py --preset full \
+  --case gate_points_2102 \
+  --case v2106_simple_network \
+  --case v2106_attributed_network
+```
 
 ## Measurement and output
 
@@ -94,7 +118,9 @@ ends. Reports use the median and retain raw samples and quartiles.
 Every result row also records the selected execution path. A kernel-enabled
 worker that crosses a dispatch threshold is reported as
 `general-mlx (kernel fallback)` rather than being mistaken for an executed
-custom kernel.
+custom kernel. Model rows report `mixed-model-kernels` when kernel-aware
+submodules are enabled; this does not imply that every operation in the model
+uses a generated kernel.
 
 Each run creates:
 

@@ -6,7 +6,7 @@ import importlib.metadata
 from typing import Any, Callable
 
 from .common import Task
-from .workloads import CASE_DESCRIPTIONS, spherical_irreps
+from .workloads import CASE_DESCRIPTIONS, ring_edges, spherical_irreps
 
 
 _USE_CUSTOM_KERNELS = False
@@ -306,6 +306,220 @@ def build_scatter_sum(config: dict[str, Any]) -> Task:
     )
 
 
+def _model_graph(config, *, input_dim, node_attr_dim=0, edge_attr_dim=0):
+    mx, _, _, _ = _imports()
+    source, destination = ring_edges(config["nodes"], config["neighbors"])
+    positions = 0.25 * mx.random.normal((config["nodes"], 3))
+    node_input = mx.random.normal((config["nodes"], input_dim))
+    node_attr = (
+        mx.random.normal((config["nodes"], node_attr_dim))
+        if node_attr_dim
+        else None
+    )
+    edge_attr = (
+        mx.random.normal((len(source), edge_attr_dim))
+        if edge_attr_dim
+        else None
+    )
+    batch = mx.zeros((config["nodes"],), dtype=mx.int32)
+    edge_src = mx.array(source, dtype=mx.int32)
+    edge_dst = mx.array(destination, dtype=mx.int32)
+    return positions, node_input, node_attr, edge_attr, batch, edge_src, edge_dst
+
+
+def _model_dispatch(*, supports_kernels: bool) -> str:
+    if not _USE_CUSTOM_KERNELS:
+        return "general-mlx"
+    if not supports_kernels:
+        return "general-mlx (model has no kernel toggle)"
+    return "mixed-model-kernels"
+
+
+def build_gate_points_2102(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    from e3nn_mlx.models.gate_points_2102 import Network
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_hidden = " + ".join(
+        f"{config['mul']}x{degree}{parity}"
+        for degree in range(config["lmax"] + 1)
+        for parity in ("e", "o")
+    )
+    module = Network(
+        irreps_in,
+        irreps_hidden,
+        "1x0e",
+        irreps_node_attr,
+        o3.Irreps.spherical_harmonics(config["lmax"]),
+        layers=config["layers"],
+        max_radius=2.0,
+        number_of_basis=8,
+        radial_layers=2,
+        radial_neurons=max(16, 4 * config["mul"]),
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        reduce_output=True,
+    )
+    positions, node_input, node_attr, _, batch, edge_src, edge_dst = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+    )
+
+    def forward(pos, features, attributes):
+        return module.forward_with_edges(
+            pos,
+            features,
+            attributes,
+            batch,
+            edge_src,
+            edge_dst,
+            num_graphs=1,
+        ).array
+
+    train, compile_train = _module_grad(
+        module,
+        lambda pos, features, attributes: mx.mean(
+            forward(pos, features, attributes) ** 2
+        ),
+        positions,
+        node_input,
+        node_attr,
+    )
+    return _task(
+        name="gate_points_2102",
+        config=config,
+        item_count=config["nodes"],
+        forward=lambda: forward(positions, node_input, node_attr),
+        compile_forward=_compiled(forward, positions, node_input, node_attr),
+        train=train,
+        compile_train=compile_train,
+        dispatch=_model_dispatch(supports_kernels=False),
+    )
+
+
+def build_v2106_simple_network(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    from e3nn_mlx.models.v2106 import SimpleNetwork
+
+    irreps_in = o3.Irreps("4x0e")
+    module = SimpleNetwork(
+        irreps_in,
+        "1x0e",
+        max_radius=2.0,
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        mul=config["mul"],
+        layers=config["layers"],
+        lmax=config["lmax"],
+        pool_nodes=True,
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
+    )
+    positions, node_input, _, _, batch, edge_src, edge_dst = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+    )
+
+    def forward(pos, features):
+        return module.forward_with_edges(
+            pos,
+            features,
+            batch,
+            edge_src,
+            edge_dst,
+            num_graphs=1,
+        ).array
+
+    train, compile_train = _module_grad(
+        module,
+        lambda pos, features: mx.mean(forward(pos, features) ** 2),
+        positions,
+        node_input,
+    )
+    return _task(
+        name="v2106_simple_network",
+        config=config,
+        item_count=config["nodes"],
+        forward=lambda: forward(positions, node_input),
+        compile_forward=_compiled(forward, positions, node_input),
+        train=train,
+        compile_train=compile_train,
+        dispatch=_model_dispatch(supports_kernels=True),
+    )
+
+
+def build_v2106_attributed_network(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    from e3nn_mlx.models.v2106 import NetworkForAGraphWithAttributes
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_edge_attr = o3.Irreps("2x0e")
+    module = NetworkForAGraphWithAttributes(
+        irreps_in,
+        irreps_node_attr,
+        irreps_edge_attr,
+        "1x0e",
+        max_radius=2.0,
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        mul=config["mul"],
+        layers=config["layers"],
+        lmax=config["lmax"],
+        pool_nodes=True,
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
+    )
+    (
+        positions,
+        node_input,
+        node_attr,
+        edge_attr,
+        batch,
+        edge_src,
+        edge_dst,
+    ) = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+        edge_attr_dim=irreps_edge_attr.dim,
+    )
+
+    def forward(pos, features, attributes, edge_attributes):
+        return module.forward_with_edges(
+            pos,
+            features,
+            attributes,
+            edge_attributes,
+            batch,
+            edge_src,
+            edge_dst,
+            num_graphs=1,
+        ).array
+
+    train, compile_train = _module_grad(
+        module,
+        lambda pos, features, attributes, edge_attributes: mx.mean(
+            forward(pos, features, attributes, edge_attributes) ** 2
+        ),
+        positions,
+        node_input,
+        node_attr,
+        edge_attr,
+    )
+    arguments = positions, node_input, node_attr, edge_attr
+    return _task(
+        name="v2106_attributed_network",
+        config=config,
+        item_count=config["nodes"],
+        forward=lambda: forward(*arguments),
+        compile_forward=_compiled(forward, *arguments),
+        train=train,
+        compile_train=compile_train,
+        dispatch=_model_dispatch(supports_kernels=True),
+    )
+
+
 BUILDERS = {
     "spherical_harmonics": build_spherical_harmonics,
     "full_tensor_product": build_full_tensor_product,
@@ -313,4 +527,7 @@ BUILDERS = {
     "weighted_tensor_product_uvu": build_weighted_tensor_product_uvu,
     "linear": build_linear,
     "scatter_sum": build_scatter_sum,
+    "gate_points_2102": build_gate_points_2102,
+    "v2106_simple_network": build_v2106_simple_network,
+    "v2106_attributed_network": build_v2106_attributed_network,
 }
