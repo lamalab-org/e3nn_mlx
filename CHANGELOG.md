@@ -17,6 +17,9 @@ follow [Semantic Versioning](https://semver.org/).
 - Validate tensor-product weight dtypes, unshared-weight batch dimensions,
   invalid unweighted `uvw` instructions, and instructions that reference
   zero-multiplicity irreps consistently across execution paths.
+- Keep shared TensorProduct weights compact during batched contractions,
+  avoiding per-item parameter-gradient materialization, and route dense scalar
+  Metal plans through the faster general MLX path at their measured crossover.
 
 ### Testing
 
@@ -25,6 +28,8 @@ follow [Semantic Versioning](https://semver.org/).
   compare identical NumPy-generated inputs, forward values, and VJPs.
 - Consolidate performance evaluation into one three-way Torch-CPU,
   general-MLX, and kernel-MLX suite with smoke and full presets.
+- Record the actually selected MLX execution path in performance artifacts so
+  automatic kernel fallbacks remain distinguishable from kernel dispatches.
 
 ## 0.1.0
 

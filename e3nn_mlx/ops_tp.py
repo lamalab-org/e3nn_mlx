@@ -28,6 +28,7 @@ from .ops_basic import compile_or_identity, get_extension
 # modifying the selection control flow.
 _METAL_SCALAR_PATH_MAX_TERMS = 2_000_000
 _METAL_SCALAR_PATH_MAX_BATCH = 512
+_METAL_SCALAR_PATH_MAX_WORK = 2_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -404,7 +405,18 @@ def _numerical_tensor_product(
         left = IrrepsArray(left.irreps, mx.broadcast_to(left.array, (*leading_shape, left.irreps.dim)))
     if right.leading_shape != leading_shape:
         right = IrrepsArray(right.irreps, mx.broadcast_to(right.array, (*leading_shape, right.irreps.dim)))
-    if weights is not None and weight_leading_shape != leading_shape:
+    # A one-dimensional weight vector is shared across every leading input
+    # dimension.  Keep it compact and let the contraction broadcast it
+    # implicitly: materializing ``(*leading_shape, weight_numel)`` makes
+    # reverse mode construct one weight-gradient row per item before reducing
+    # it back to the shared parameter, which is especially expensive for dense
+    # ``uvw`` products.  Non-empty leading dimensions identify batched
+    # (unshared) weights and still need explicit broadcasting when compatible.
+    if (
+        weights is not None
+        and weight_leading_shape
+        and weight_leading_shape != leading_shape
+    ):
         weights = mx.broadcast_to(
             weights,
             (*leading_shape, plan.weight_numel),
@@ -693,9 +705,9 @@ class TensorProduct(mlx_module_base()):
         )
         self._metal_kernel_kind = "scalar_paths"
 
-    def _try_metal(
+    def _metal_dispatch_kind(
         self, left_array: Any, right_array: Any, weight: Any | None
-    ) -> Any | None:
+    ) -> str | None:
         mx, _ = require_mlx()
         if (
             self._metal_operation is None
@@ -712,7 +724,11 @@ class TensorProduct(mlx_module_base()):
         # at large edge counts and are not subject to this crossover guard.
         if (
             getattr(self, "_metal_kernel_kind", None) == "scalar_paths"
-            and left_array.shape[0] > _METAL_SCALAR_PATH_MAX_BATCH
+            and (
+                left_array.shape[0] > _METAL_SCALAR_PATH_MAX_BATCH
+                or self._metal_path_count * left_array.shape[0]
+                > _METAL_SCALAR_PATH_MAX_WORK
+            )
         ):
             return None
         if self.weight_numel > 0:
@@ -726,9 +742,14 @@ class TensorProduct(mlx_module_base()):
                     return None
             else:
                 return None
-            metal_weight = weight
-        else:
-            metal_weight = self._metal_dummy_weight
+        return getattr(self, "_metal_kernel_kind", None)
+
+    def _try_metal(
+        self, left_array: Any, right_array: Any, weight: Any | None
+    ) -> Any | None:
+        if self._metal_dispatch_kind(left_array, right_array, weight) is None:
+            return None
+        metal_weight = weight if self.weight_numel > 0 else self._metal_dummy_weight
         return self._metal_operation(left_array, right_array, metal_weight)
 
     def _general_call_arrays(

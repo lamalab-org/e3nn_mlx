@@ -65,6 +65,7 @@ def _task(
         item_count=item_count,
         forward=torch.inference_mode()(forward),
         synchronize=_sync,
+        dispatch="torch-eager",
         train=train,
     )
 
@@ -153,17 +154,21 @@ def build_fully_connected_tensor_product(config: dict[str, Any]) -> Task:
 def _weighted_uvu(o3, config):
     irreps_left = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
     irreps_right = o3.Irreps.spherical_harmonics(config["lmax"])
-    instructions = [
-        (i_left, i_right, i_out, "uvu", True)
-        for i_left, left in enumerate(irreps_left)
-        for i_right, right in enumerate(irreps_right)
-        for i_out, out in enumerate(irreps_left)
-        if out.ir in (left.ir * right.ir)
-    ]
+    outputs = []
+    instructions = []
+    for i_left, left in enumerate(irreps_left):
+        for i_right, right in enumerate(irreps_right):
+            for out in irreps_left:
+                if out.ir not in (left.ir * right.ir):
+                    continue
+                outputs.append(str(out))
+                instructions.append(
+                    (i_left, i_right, len(outputs) - 1, "uvu", True)
+                )
     return o3.TensorProduct(
         irreps_left,
         irreps_right,
-        irreps_left,
+        " + ".join(outputs),
         instructions,
         internal_weights=False,
         shared_weights=False,

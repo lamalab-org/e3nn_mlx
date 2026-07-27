@@ -20,6 +20,7 @@ def _row(backend, median, *, phase="forward"):
         "phase": phase,
         "backend": backend,
         "execution": "eager" if backend == "torch-cpu" else "compiled",
+        "dispatch": "torch-eager" if backend == "torch-cpu" else "general-mlx",
         "status": "ok",
         "median_ms": median,
         "p25_ms": median * 0.9,
@@ -140,6 +141,9 @@ def test_result_round_trip_speedups_and_compact_plots(tmp_path) -> None:
     latency = (output / "latency_forward.svg").read_text()
     assert "torch-cpu" in latency
     assert "mlx-kernel" in latency
+    report = (output / "report.html").read_text()
+    assert "Selected path" in report
+    assert "general-mlx" in report
     assert json.loads(result_path.read_text())["metadata"]["schema_version"] == 1
 
 
@@ -148,3 +152,24 @@ def test_backend_builders_match_the_documented_case_set() -> None:
 
     assert tuple(mlx_cases.BUILDERS) == case_names()
     assert tuple(torch_cases.BUILDERS) == case_names()
+
+
+@pytest.mark.mlx
+def test_mlx_benchmark_reports_actual_tensor_product_dispatch() -> None:
+    from evals import mlx_cases
+
+    mlx_cases.configure(use_custom_kernels=True)
+    small = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 16, "mul": 8, "lmax": 2}
+    )
+    dense = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 64, "mul": 8, "lmax": 2}
+    )
+    mlx_cases.configure(use_custom_kernels=False)
+    general = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 16, "mul": 8, "lmax": 2}
+    )
+
+    assert small.dispatch == "metal-scalar-paths"
+    assert dense.dispatch == "general-mlx (kernel fallback)"
+    assert general.dispatch == "general-mlx"

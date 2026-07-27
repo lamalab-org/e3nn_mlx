@@ -21,6 +21,12 @@ Metal kernels. Dispatch is automatic: compatible kernels fuse indexing,
 Clebsch–Gordan contraction, weighting, and accumulation; the general MLX path
 handles unsupported inputs and performance crossover points.
 
+Dense shared-weight tensor products deliberately keep their parameter vector
+compact. Expanding a shared vector across the batch produces the same forward
+values but creates a large per-item weight-gradient reduction. The compact
+execution is used by FullyConnectedTensorProduct and by general shared-weight
+TensorProduct instructions in every connection mode.
+
 Set `use_custom_kernel=False` to compare paths or to request the most general
 automatic-differentiation behavior. Disabling a kernel changes execution, not
 the mathematical operation.

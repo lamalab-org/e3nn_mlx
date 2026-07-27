@@ -46,7 +46,7 @@ PRESETS: dict[str, dict[str, dict[str, Any]]] = {
         "scatter_sum": {"items": 512, "nodes": 64, "width": 32},
     },
     "full": {
-        "spherical_harmonics": {"items": 262_144, "lmax": 6},
+        "spherical_harmonics": {"items": 262_144, "lmax": 4},
         "full_tensor_product": {"items": 512, "mul": 8, "lmax": 3},
         "fully_connected_tensor_product": {
             "items": 2_048,

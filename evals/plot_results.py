@@ -141,6 +141,7 @@ def write_csv(path: Path, rows) -> None:
         "phase",
         "backend",
         "execution",
+        "dispatch",
         "status",
         "median_ms",
         "p25_ms",
@@ -194,6 +195,7 @@ def write_html(path: Path, rows, generated: list[str]) -> None:
             f"<td>{escape(str(row.get('case', '')))}</td>"
             f"<td>{escape(str(row.get('backend', '')))}</td>"
             f"<td>{escape(str(row.get('execution', '')))}</td>"
+            f"<td>{escape(str(row.get('dispatch', '')))}</td>"
             f"<td>{median}</td><td>{compile_ms}</td>"
             f"<td>{escape(str(row.get('status', '')))}</td>"
             "</tr>"
@@ -220,7 +222,7 @@ execution; only <code>mlx-kernel</code> enables generated kernels.</p>
         + """
 <h2>Measurements</h2>
 <table><thead><tr><th>Phase</th><th>Case</th><th>Backend</th>
-<th>Execution</th><th>Steady median (ms)</th><th>Compile (ms)</th>
+<th>Execution</th><th>Selected path</th><th>Steady median (ms)</th><th>Compile (ms)</th>
 <th>Status</th></tr></thead><tbody>
 """
         + "\n".join(table_rows)

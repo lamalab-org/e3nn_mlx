@@ -81,6 +81,7 @@ def _result_row(
     row = {
         "backend": backend,
         "execution": execution,
+        "dispatch": task.dispatch,
         "phase": phase,
         "case": task.name,
         "description": task.description,

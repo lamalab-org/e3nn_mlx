@@ -91,6 +91,10 @@ Torch CPU uses `os.cpu_count()` threads. MLX uses compiled execution for both
 workers, while Torch uses upstream eager execution. Warmups occur before
 recording. Every MLX sample is synchronized before its wall-clock interval
 ends. Reports use the median and retain raw samples and quartiles.
+Every result row also records the selected execution path. A kernel-enabled
+worker that crosses a dispatch threshold is reported as
+`general-mlx (kernel fallback)` rather than being mistaken for an executed
+custom kernel.
 
 Each run creates:
 

@@ -275,6 +275,68 @@ def test_unshared_weights_require_a_leading_dimension() -> None:
 
 
 @pytest.mark.mlx
+def test_shared_tensor_product_weights_are_not_materialized_per_item(
+    monkeypatch,
+) -> None:
+    mx = mlx_backend._require()
+    product = o3.FullyConnectedTensorProduct(
+        "4x0e + 4x1o",
+        "4x0e + 4x1o",
+        "4x0e + 4x1o",
+        use_custom_kernel=False,
+    )
+    left = _array(product.irreps_in1, mx.ones((8, product.irreps_in1.dim)))
+    right = _array(product.irreps_in2, mx.ones((8, product.irreps_in2.dim)))
+    shared_weight = product.weight
+    materialized_shapes = []
+    original_broadcast_to = mx.broadcast_to
+
+    def record_broadcast(array, shape, *args, **kwargs):
+        if array is shared_weight:
+            materialized_shapes.append(tuple(shape))
+        return original_broadcast_to(array, shape, *args, **kwargs)
+
+    monkeypatch.setattr(mx, "broadcast_to", record_broadcast)
+    output = product(left, right)
+    mx.eval(output.array)
+
+    assert output.shape == (8, product.irreps_out.dim)
+    assert materialized_shapes == []
+
+
+@pytest.mark.mlx
+def test_compact_shared_weight_gradient_matches_summed_per_item_gradient() -> None:
+    mx = mlx_backend._require()
+    product = o3.FullyConnectedTensorProduct(
+        "2x0e + 2x1o",
+        "2x0e + 2x1o",
+        "2x0e + 2x1o",
+        use_custom_kernel=False,
+    )
+    left = mx.arange(24, dtype=mx.float32).reshape(3, 8) / 17.0 - 0.4
+    right = mx.arange(24, dtype=mx.float32).reshape(3, 8) / 19.0 - 0.6
+    shared_weight = product.weight
+    per_item_weight = mx.broadcast_to(
+        shared_weight,
+        (left.shape[0], product.weight_numel),
+    )
+
+    def loss(weight):
+        return mx.sum(product._general_call_arrays(left, right, weight) ** 2)
+
+    shared_output = product._general_call_arrays(left, right, shared_weight)
+    per_item_output = product._general_call_arrays(left, right, per_item_weight)
+    shared_gradient = mx.grad(loss)(shared_weight)
+    per_item_gradient = mx.grad(loss)(per_item_weight)
+
+    assert _maximum_error(shared_output, per_item_output) < 2e-6
+    assert _maximum_error(
+        shared_gradient,
+        mx.sum(per_item_gradient, axis=0),
+    ) < 2e-5
+
+
+@pytest.mark.mlx
 def test_mixed_weighted_instruction_views_match_forward_and_weight_lists() -> None:
     mx = mlx_backend._require()
     product = o3.TensorProduct(

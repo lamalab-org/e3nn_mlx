@@ -281,6 +281,16 @@ DOCUMENTED_SOURCE_CONTRACTS = (
     ),
     (
         "docs/guide/tensor_products.md",
+        "Shared weights remain one-dimensional during execution.",
+        "tests/test_tensor_product_compatibility_qualification.py::test_shared_tensor_product_weights_are_not_materialized_per_item",
+    ),
+    (
+        "docs/guide/tensor_products.md",
+        "Scalar-path kernel selection considers both the static contraction size and the batch size.",
+        "tests/test_metal_kernels.py::test_dense_scalar_tensor_product_dispatch_uses_work_guard",
+    ),
+    (
+        "docs/guide/tensor_products.md",
         "Both paths implement the same contraction and normalization conventions.",
         "tests/test_tensor_product_correctness.py::test_optimized_full_tensor_product_matches_fallback_outputs_and_gradients",
     ),
@@ -313,6 +323,16 @@ DOCUMENTED_SOURCE_CONTRACTS = (
         "docs/guide/performance.md",
         "Disabling a kernel changes execution, not the mathematical operation.",
         "tests/test_metal_kernels.py::test_spherical_harmonics_kernel_matches_general_forward_gradient_and_hessian",
+    ),
+    (
+        "docs/guide/performance.md",
+        "Dense shared-weight tensor products deliberately keep their parameter vector compact.",
+        "tests/test_tensor_product_compatibility_qualification.py::test_shared_tensor_product_weights_are_not_materialized_per_item",
+    ),
+    (
+        "evals/README.md",
+        "Every result row also records the selected execution path.",
+        "tests/test_evals.py::test_mlx_benchmark_reports_actual_tensor_product_dispatch",
     ),
     (
         "docs/guide/performance.md",

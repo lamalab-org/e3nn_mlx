@@ -52,6 +52,7 @@ def _task(
     compile_forward: Callable[[], Callable[[], Any]],
     train: Callable[[], Any],
     compile_train: Callable[[], Callable[[], Any]],
+    dispatch: str = "general-mlx",
 ) -> Task:
     mx, _, _, _ = _imports()
     return Task(
@@ -62,12 +63,22 @@ def _task(
         item_count=item_count,
         forward=forward,
         synchronize=_sync,
+        dispatch=dispatch,
         compile_forward=compile_forward,
         train=train,
         compile_train=compile_train,
         reset_peak_memory=mx.reset_peak_memory,
         peak_memory=mx.get_peak_memory,
     )
+
+
+def _tensor_product_dispatch(module, left, right, weight=None) -> str:
+    if not _USE_CUSTOM_KERNELS:
+        return "general-mlx"
+    kind = module._metal_dispatch_kind(left, right, weight)
+    if kind is None:
+        return "general-mlx (kernel fallback)"
+    return f"metal-{kind.replace('_', '-')}"
 
 
 def _compiled(function, *arguments):
@@ -112,6 +123,15 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
         compile_forward=_compiled(forward, vectors),
         train=lambda: value_grad(vectors),
         compile_train=_compiled(value_grad, vectors),
+        dispatch=(
+            "metal-spherical-harmonics"
+            if _USE_CUSTOM_KERNELS and config["lmax"] <= 4
+            else (
+                "general-mlx (kernel fallback)"
+                if _USE_CUSTOM_KERNELS
+                else "general-mlx"
+            )
+        ),
     )
 
 
@@ -141,6 +161,7 @@ def build_full_tensor_product(config: dict[str, Any]) -> Task:
         compile_forward=_compiled(forward, left, right),
         train=lambda: value_grad(left, right),
         compile_train=_compiled(value_grad, left, right),
+        dispatch=_tensor_product_dispatch(module, left, right),
     )
 
 
@@ -173,23 +194,28 @@ def build_fully_connected_tensor_product(config: dict[str, Any]) -> Task:
         compile_forward=_compiled(forward, left, right),
         train=train,
         compile_train=compile_train,
+        dispatch=_tensor_product_dispatch(module, left, right, module.weight),
     )
 
 
 def _weighted_uvu(o3, config):
     irreps_left = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
     irreps_right = o3.Irreps.spherical_harmonics(config["lmax"])
-    instructions = [
-        (i_left, i_right, i_out, "uvu", True)
-        for i_left, left in enumerate(irreps_left)
-        for i_right, right in enumerate(irreps_right)
-        for i_out, out in enumerate(irreps_left)
-        if out.ir in (left.ir * right.ir)
-    ]
+    outputs = []
+    instructions = []
+    for i_left, left in enumerate(irreps_left):
+        for i_right, right in enumerate(irreps_right):
+            for out in irreps_left:
+                if out.ir not in (left.ir * right.ir):
+                    continue
+                outputs.append(str(out))
+                instructions.append(
+                    (i_left, i_right, len(outputs) - 1, "uvu", True)
+                )
     return o3.TensorProduct(
         irreps_left,
         irreps_right,
-        irreps_left,
+        " + ".join(outputs),
         instructions,
         internal_weights=False,
         shared_weights=False,
@@ -222,6 +248,7 @@ def build_weighted_tensor_product_uvu(config: dict[str, Any]) -> Task:
         compile_forward=_compiled(forward, *arguments),
         train=lambda: value_grad(*arguments),
         compile_train=_compiled(value_grad, *arguments),
+        dispatch=_tensor_product_dispatch(module, *arguments),
     )
 
 
@@ -247,6 +274,7 @@ def build_linear(config: dict[str, Any]) -> Task:
         compile_forward=_compiled(forward, values),
         train=train,
         compile_train=compile_train,
+        dispatch="general-mlx",
     )
 
 
@@ -272,6 +300,9 @@ def build_scatter_sum(config: dict[str, Any]) -> Task:
         compile_forward=_compiled(forward, values),
         train=lambda: value_grad(values),
         compile_train=_compiled(value_grad, values),
+        dispatch=(
+            "metal-scatter-sum" if _USE_CUSTOM_KERNELS else "general-mlx"
+        ),
     )
 
 

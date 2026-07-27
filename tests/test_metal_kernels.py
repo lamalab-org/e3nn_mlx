@@ -6,6 +6,7 @@ import pytest
 
 from e3nn_mlx.backend import mlx_backend
 from e3nn_mlx import (
+    FullyConnectedTensorProduct,
     FullTensorProduct,
     IrrepsArray,
     TensorProduct,
@@ -295,6 +296,35 @@ def test_scalar_tensor_product_dispatch_boundary_preserves_results():
     assert fallback is None
     expected = product._general_call_arrays(left[:512], right[:512])
     assert _maximum_error(custom, expected) < 3e-5
+
+
+@pytest.mark.mlx
+def test_dense_scalar_tensor_product_dispatch_uses_work_guard():
+    mx = mlx_backend._require()
+    irreps = "8x0e + 8x1o + 8x2e"
+    product = FullyConnectedTensorProduct(
+        irreps,
+        irreps,
+        irreps,
+        use_custom_kernel=True,
+    )
+    assert product._metal_kernel_kind == "scalar_paths"
+    assert product._metal_operation is not None
+
+    small_left = mx.ones((16, product.irreps_in1.dim), dtype=mx.float32)
+    small_right = mx.ones((16, product.irreps_in2.dim), dtype=mx.float32)
+    large_left = mx.ones((64, product.irreps_in1.dim), dtype=mx.float32)
+    large_right = mx.ones((64, product.irreps_in2.dim), dtype=mx.float32)
+
+    assert (
+        product._metal_dispatch_kind(small_left, small_right, product.weight)
+        == "scalar_paths"
+    )
+    assert product._try_metal(small_left, small_right, product.weight) is not None
+    assert product._metal_dispatch_kind(
+        large_left, large_right, product.weight
+    ) is None
+    assert product._try_metal(large_left, large_right, product.weight) is None
 
 
 @pytest.mark.mlx

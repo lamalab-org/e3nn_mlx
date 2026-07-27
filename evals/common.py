@@ -29,6 +29,7 @@ class Task:
     item_count: int
     forward: Callable[[], Any]
     synchronize: Callable[[Any], None]
+    dispatch: str | None = None
     compile_forward: Callable[[], Callable[[], Any]] | None = None
     train: Callable[[], Any] | None = None
     compile_train: Callable[[], Callable[[], Any]] | None = None
