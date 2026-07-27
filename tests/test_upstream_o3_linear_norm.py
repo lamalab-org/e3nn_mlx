@@ -137,6 +137,66 @@ def test_upstream_linear_weight_views_and_unshared_weights() -> None:
 
 
 @pytest.mark.mlx
+def test_linear_default_weight_paths_follow_upstream_input_major_order() -> None:
+    module = o3.Linear(
+        "2x2o + 2x3e",
+        "1x3e + 3x2o",
+        internal_weights=False,
+    )
+    assert [
+        (instruction.i_in, instruction.i_out, instruction.path_shape)
+        for instruction in module.instructions
+    ] == [
+        (0, 1, (2, 3)),
+        (1, 0, (2, 1)),
+    ]
+
+
+@pytest.mark.mlx
+def test_grouped_linear_external_weight_vjp_matches_blockwise_formula() -> None:
+    mx = mlx_backend._require()
+    module = o3.Linear(
+        "3x2e + 3x3e + 2x2e",
+        "3x2e + 3x3e + 3x2e",
+        internal_weights=False,
+        path_normalization="path",
+    )
+    values = mx.arange(2 * module.irreps_in.dim, dtype=mx.float32).reshape(
+        2, module.irreps_in.dim
+    ) / 31.0
+    weights = mx.arange(module.weight_numel, dtype=mx.float32) / 29.0
+    cotangent = mx.arange(
+        2 * module.irreps_out.dim, dtype=mx.float32
+    ).reshape(2, module.irreps_out.dim) / 37.0
+
+    def apply(weight):
+        return module(
+            o3.IrrepsArray(module.irreps_in, values),
+            weight,
+        ).array
+
+    _, (actual,) = mx.vjp(apply, (weights,), (cotangent,))
+    input_chunks = o3.IrrepsArray(module.irreps_in, values).chunk_arrays()
+    output_chunks = o3.IrrepsArray(
+        module.irreps_out, cotangent
+    ).chunk_arrays()
+    expected = []
+    for instruction in module.instructions:
+        left = input_chunks[instruction.input_index].reshape(
+            2, instruction.in_mul, instruction.dim
+        )
+        right = output_chunks[instruction.output_index].reshape(
+            2, instruction.out_mul, instruction.dim
+        )
+        gradient = instruction.path_weight * mx.einsum(
+            "bid,bod->io", left, right
+        )
+        expected.append(gradient.reshape(-1))
+    expected = mx.concatenate(expected)
+    assert float(mx.max(mx.abs(actual - expected))) < 2e-6
+
+
+@pytest.mark.mlx
 def test_upstream_linear_feature_channels() -> None:
     mx = mlx_backend._require()
     module = o3.Linear("0e + 1e + 2e", "0e + 2x1e + 2e", f_in=44, f_out=25, bias=False, compile=True)
