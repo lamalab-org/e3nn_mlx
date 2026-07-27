@@ -84,6 +84,8 @@ For seeded numerical qualification across randomized irreps, instruction
 topologies, connection modes, multiplicities, weight layouts, broadcasting,
 and MLX execution paths, see
 [RANDOMIZED_PARITY.md](RANDOMIZED_PARITY.md).
+For randomized forward-and-VJP parity across the broader numerical API, see
+[RANDOMIZED_OPERATION_PARITY.md](RANDOMIZED_OPERATION_PARITY.md).
 
 ## Quick smoke comparison
 
