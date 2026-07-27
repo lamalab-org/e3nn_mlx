@@ -67,6 +67,12 @@ DOCUMENTED_EVIDENCE = {
         "tests/test_upstream_o3_tensor_product.py::test_upstream_fully_connected_tensor_product_is_statistically_normalized",
     "shared and unshared tensor-product weights":
         "tests/test_upstream_o3_tensor_product.py::test_upstream_tensor_product_unshared_weight_broadcast_and_validation",
+    "upstream Linear default path order":
+        "tests/test_upstream_o3_linear_norm.py::test_linear_default_weight_paths_follow_upstream_input_major_order",
+    "grouped Linear external-weight gradients":
+        "tests/test_upstream_o3_linear_norm.py::test_grouped_linear_external_weight_vjp_matches_blockwise_formula",
+    "explicit tensor-product validation":
+        "tests/test_tensor_product_compatibility_qualification.py::test_constructor_rejects_upstream_invalid_uvw_and_static_configurations",
     "tensor-product wrappers match explicit contractions":
         "tests/test_tensor_product_correctness.py::test_full_tensor_product_matches_explicit_tensor_product",
     "reduced-tensor intermediate and output filters":
@@ -277,6 +283,21 @@ DOCUMENTED_SOURCE_CONTRACTS = (
         "docs/guide/tensor_products.md",
         "Both paths implement the same contraction and normalization conventions.",
         "tests/test_tensor_product_correctness.py::test_optimized_full_tensor_product_matches_fallback_outputs_and_gradients",
+    ),
+    (
+        "docs/guide/linear.md",
+        "Without explicit instructions, `Linear` enumerates compatible paths in input-major, then output-index order, matching upstream e3nn.",
+        "tests/test_upstream_o3_linear_norm.py::test_linear_default_weight_paths_follow_upstream_input_major_order",
+    ),
+    (
+        "docs/guide/linear.md",
+        "The grouped execution path preserves derivatives with respect to external weights, including repeated input and output irrep blocks.",
+        "tests/test_upstream_o3_linear_norm.py::test_grouped_linear_external_weight_vjp_matches_blockwise_formula",
+    ),
+    (
+        "docs/COMPATIBILITY.md",
+        "Mode `uvw` always requires weights",
+        "tests/test_tensor_product_compatibility_qualification.py::test_constructor_rejects_upstream_invalid_uvw_and_static_configurations",
     ),
     (
         "docs/guide/equivariance.md",

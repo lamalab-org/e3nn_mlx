@@ -59,6 +59,32 @@ Tensor products support `component`, `norm`, and `none` irrep normalization,
 and `element`, `path`, and `none` path normalization.  The legacy path token
 `component` is accepted as an alias for `element`.
 
+## Linear weight semantics
+
+`Linear` connects only identical input and output irreps. Default instructions
+and their flattened weights use upstream e3nn's input-major, then output-index
+order. Each instruction's flat slice reshapes to
+`(input_multiplicity, output_multiplicity)`.
+
+Shared external weights have shape `(weight_numel,)`; unshared external weights
+have shape `(..., weight_numel)` and broadcast over input leading dimensions.
+Feature-channel Linear weights end in `(f_in, f_out, weight_numel)`.
+Normalization is applied during the forward contraction. Grouping compatible
+paths is an execution optimization and does not change outputs or gradients
+with respect to inputs or external weights.
+
+## Explicit tensor-product instructions
+
+Instruction indices refer to the irreps exactly as supplied to the constructor,
+before zero-multiplicity blocks are removed internally. An instruction cannot
+reference a zero-multiplicity block. Mode `uvw` always requires weights, and
+`shared_weights=False` requires an external weight batch dimension rather than
+a shared one-dimensional vector.
+
+Tensor-product inputs and weights must have the same dtype. Repeated
+instructions targeting one output are accumulated, while compatible leading
+input and unshared-weight dimensions follow NumPy broadcasting.
+
 ## Zero vectors
 
 With `normalize=True`, spherical harmonics return the normalized scalar for

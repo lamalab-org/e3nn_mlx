@@ -25,6 +25,19 @@ gate = nn.Gate(
 )
 ```
 
+## Moving Linear weights
+
+Default `Linear` paths and flattened weights follow upstream's input-major,
+then output-index order. A flat upstream weight array can be copied without
+reordering when the input irreps, output irreps, and explicit instructions are
+the same. Use `weight_views(..., yield_instruction=True)` on both sides of a
+converter to verify every path shape and meaning.
+
+For weights generated per sample or graph edge, construct the MLX layer with
+`internal_weights=False, shared_weights=False` and pass an array shaped
+`(..., weight_numel)`. See the [Linear guide](linear.md) for the complete
+layout and normalization contract.
+
 ## Deliberate differences
 
 - MLX evaluates lazily. Include `mx.eval(...)` before reading results and when
