@@ -12,7 +12,7 @@ elapsed = time.perf_counter() - start
 
 Run warm-up iterations before sampling so compilation and kernel caching are
 not counted as steady-state inference. The repository's `evals/` harness does
-this consistently across MLX, PyTorch CPU, and PyTorch MPS.
+this consistently across Torch CPU, general MLX, and kernel-enabled MLX.
 
 ## Generated Metal kernels
 
@@ -47,5 +47,5 @@ a sparse sorted prefix sum with linear memory. Ordinary scatter calls retain
 the faster indexed-add implementation.
 
 See the repository's
-[kernel evaluation guide](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/KERNEL_EVALUATION.md)
-for reproducible comparisons and the exact fallback contract.
+[evaluation guide](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/README.md)
+for the compact three-way benchmark and randomized numerical parity suites.

@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Orchestrate isolated MLX and PyTorch benchmark processes."""
+"""Run Torch CPU, general MLX, and kernel-enabled MLX in isolation."""
 
 from __future__ import annotations
 
 import argparse
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -18,43 +19,30 @@ from evals.workloads import DEFAULT_TIMING, case_names
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKERS = ("torch-cpu", "mlx", "mlx-kernel")
 
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("both", "mlx", "torch"), default="both")
-    parser.add_argument(
-        "--backend-order",
-        choices=("mlx-first", "torch-first"),
-        default="mlx-first",
-    )
     parser.add_argument("--preset", choices=tuple(DEFAULT_TIMING), default="smoke")
     parser.add_argument("--case", action="append", choices=case_names(), dest="cases")
-    parser.add_argument("--phase", action="append", choices=("forward", "train"), dest="phases")
+    parser.add_argument(
+        "--phase",
+        action="append",
+        choices=("forward", "train"),
+        dest="phases",
+    )
     parser.add_argument("--warmup", type=int)
     parser.add_argument("--samples", type=int)
-    parser.add_argument("--inner-repeats", type=int)
     parser.add_argument("--set", action="append", default=[], dest="overrides")
     parser.add_argument("--mlx-python", type=Path, default=ROOT / ".venv/bin/python")
     parser.add_argument(
-        "--torch-python", type=Path, default=ROOT / "evals/.venv-torch/bin/python"
-    )
-    parser.add_argument(
-        "--torch-device",
-        choices=("auto", "mps", "cpu", "both"),
-        default="auto",
-        help="Torch device to benchmark; 'both' runs isolated MPS and CPU workers",
-    )
-    parser.add_argument("--torch-compile", action="store_true")
-    parser.add_argument(
-        "--mlx-kernels",
-        choices=("on", "off", "both"),
-        default="on",
-        help="Run generated kernels, general MLX operations, or both isolated workers",
+        "--torch-python",
+        type=Path,
+        default=ROOT / "evals/.venv-torch/bin/python",
     )
     parser.add_argument("--output-dir", type=Path, default=ROOT / "evals/results")
-    parser.add_argument("--plot", action="store_true")
-    parser.add_argument("--fail-on-error", action="store_true")
+    parser.add_argument("--no-plot", action="store_true")
     return parser.parse_args(argv)
 
 
@@ -63,9 +51,6 @@ def worker_command(
     interpreter: Path,
     output: Path,
     args,
-    *,
-    torch_device: str | None = None,
-    mlx_kernels: str | None = None,
 ) -> list[str]:
     command = [
         str(interpreter),
@@ -81,40 +66,13 @@ def worker_command(
         command.extend(["--case", case])
     for phase in args.phases or []:
         command.extend(["--phase", phase])
-    for name in ("warmup", "samples", "inner_repeats"):
+    for name in ("warmup", "samples"):
         value = getattr(args, name)
         if value is not None:
-            command.extend([f"--{name.replace('_', '-')}", str(value)])
+            command.extend([f"--{name}", str(value)])
     for override in args.overrides:
         command.extend(["--set", override])
-    if backend == "torch":
-        command.extend(["--device", torch_device or args.torch_device])
-        if args.torch_compile:
-            command.append("--torch-compile")
-    else:
-        command.extend(["--mlx-kernels", mlx_kernels or args.mlx_kernels])
-    if args.fail_on_error:
-        command.append("--fail-on-error")
     return command
-
-
-def selected_workers(args) -> list[tuple[str, str | None, str | None]]:
-    """Return backend/device workers in the requested thermal ordering."""
-    torch_devices = (
-        ["mps", "cpu"] if args.torch_device == "both" else [args.torch_device]
-    )
-    torch_workers = [("torch", device, None) for device in torch_devices]
-    mlx_modes = ["on", "off"] if args.mlx_kernels == "both" else [args.mlx_kernels]
-    mlx_workers = [("mlx", None, mode) for mode in mlx_modes]
-    if args.backend == "mlx":
-        return mlx_workers
-    if args.backend == "torch":
-        return torch_workers
-    return (
-        mlx_workers + torch_workers
-        if args.backend_order == "mlx-first"
-        else torch_workers + mlx_workers
-    )
 
 
 def main(argv=None) -> int:
@@ -122,42 +80,44 @@ def main(argv=None) -> int:
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     run_dir = args.output_dir / stamp
     run_dir.mkdir(parents=True, exist_ok=True)
-    interpreters = {"mlx": args.mlx_python, "torch": args.torch_python}
+    interpreters = {
+        "torch-cpu": args.torch_python,
+        "mlx": args.mlx_python,
+        "mlx-kernel": args.mlx_python,
+    }
     outputs = []
     failures = 0
-    for backend, torch_device, mlx_kernels in selected_workers(args):
+
+    for backend in WORKERS:
         interpreter = interpreters[backend]
-        result_name = (
-            f"torch-{torch_device}"
-            if backend == "torch"
-            else ("mlx-kernel" if mlx_kernels == "on" else "mlx-no-kernel")
-        )
-        output = run_dir / f"{result_name}.json"
+        output = run_dir / f"{backend}.json"
         if not interpreter.exists():
             print(
                 f"{backend} interpreter does not exist: {interpreter}\n"
-                "See evals/README.md for environment setup.",
+                "See evals/README.md for setup.",
                 file=sys.stderr,
             )
             failures += 1
             continue
-        command = worker_command(
-            backend,
-            interpreter,
-            output,
-            args,
-            torch_device=torch_device,
-            mlx_kernels=mlx_kernels,
-        )
+        command = worker_command(backend, interpreter, output, args)
+        environment = os.environ.copy()
+        if backend.startswith("mlx"):
+            environment["E3NN_MLX_REQUIRE_RUNTIME"] = "1"
         print("Running:", " ".join(command), flush=True)
-        completed = subprocess.run(command, cwd=ROOT, check=False)
+        completed = subprocess.run(
+            command,
+            cwd=ROOT,
+            check=False,
+            env=environment,
+        )
         if output.exists():
             outputs.append(output)
         if completed.returncode != 0:
             failures += 1
 
-    if not outputs:
+    if len(outputs) != len(WORKERS):
         return 1
+
     runs, rows = load_documents(outputs)
     combined = run_dir / "combined.json"
     combined.write_text(
@@ -177,21 +137,21 @@ def main(argv=None) -> int:
         + "\n"
     )
     print(f"Combined results: {combined}")
-    if args.plot:
-        plot_dir = run_dir / "plots"
+
+    if not args.no_plot:
         completed = subprocess.run(
             [
                 sys.executable,
                 str(ROOT / "evals/plot_results.py"),
                 str(combined),
                 "--output-dir",
-                str(plot_dir),
+                str(run_dir / "plots"),
             ],
             cwd=ROOT,
             check=False,
         )
         failures += completed.returncode != 0
-    return 1 if failures and args.fail_on_error else 0
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

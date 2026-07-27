@@ -306,7 +306,7 @@ DOCUMENTED_SOURCE_CONTRACTS = (
     ),
     (
         "docs/guide/performance.md",
-        "The repository's `evals/` harness does this consistently across MLX, PyTorch CPU, and PyTorch MPS.",
+        "The repository's `evals/` harness does this consistently across Torch CPU, general MLX, and kernel-enabled MLX.",
         "tests/test_documentation_contract.py::test_documentation_metadata_workflow_and_timing_contracts",
     ),
     (
@@ -565,9 +565,11 @@ def test_documentation_metadata_workflow_and_timing_contracts() -> None:
     mlx_timing = (ROOT / "evals" / "mlx_cases.py").read_text(encoding="utf-8")
     torch_timing = (ROOT / "evals" / "torch_cases.py").read_text(encoding="utf-8")
     runner = (ROOT / "evals" / "common.py").read_text(encoding="utf-8")
+    orchestrator = (ROOT / "evals" / "run.py").read_text(encoding="utf-8")
     assert "mx.eval(result)" in mlx_timing and "mx.synchronize()" in mlx_timing
-    assert "torch.mps.synchronize()" in torch_timing
+    assert "torch.set_num_threads(_THREADS)" in torch_timing
     assert "synchronize(result)" in runner
+    assert 'WORKERS = ("torch-cpu", "mlx", "mlx-kernel")' in orchestrator
 
 
 @pytest.mark.mlx

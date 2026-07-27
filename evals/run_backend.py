@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one benchmark backend inside its isolated Python interpreter."""
+"""Run one isolated worker for the compact three-way benchmark."""
 
 from __future__ import annotations
 
@@ -43,7 +43,30 @@ def apply_overrides(workloads: dict[str, dict[str, Any]], overrides: list[str]) 
         workloads[case][key] = _value(raw_value)
 
 
-def result_row(
+def parse_args(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--backend",
+        choices=("torch-cpu", "mlx", "mlx-kernel"),
+        required=True,
+    )
+    parser.add_argument("--preset", choices=tuple(DEFAULT_TIMING), default="smoke")
+    parser.add_argument("--case", action="append", choices=case_names(), dest="cases")
+    parser.add_argument(
+        "--phase",
+        action="append",
+        choices=("forward", "train"),
+        dest="phases",
+    )
+    parser.add_argument("--warmup", type=int)
+    parser.add_argument("--samples", type=int)
+    parser.add_argument("--set", action="append", default=[], dest="overrides")
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--list-cases", action="store_true")
+    return parser.parse_args(argv)
+
+
+def _result_row(
     task,
     *,
     backend: str,
@@ -60,7 +83,6 @@ def result_row(
         "execution": execution,
         "phase": phase,
         "case": task.name,
-        "family": task.family,
         "description": task.description,
         "config": task.config,
         "item_count": int(task.item_count),
@@ -79,34 +101,33 @@ def result_row(
     return row
 
 
-def benchmark_mode(
+def _benchmark(
     task,
     *,
     backend: str,
-    execution: str,
     phase: str,
     function,
     compiler,
     warmup: int,
     samples: int,
-    inner_repeats: int,
 ) -> dict[str, Any]:
+    execution = "eager" if compiler is None else "compiled"
     try:
         if task.reset_peak_memory is not None:
             task.reset_peak_memory()
         compile_ms = None
         measured = function
-        if execution == "compiled":
+        if compiler is not None:
             measured, compile_ms = cold_start(compiler, task.synchronize)
         timing = measure(
             measured,
             task.synchronize,
             warmup=warmup,
             samples=samples,
-            inner_repeats=inner_repeats,
+            inner_repeats=1,
         )
         peak = task.peak_memory() if task.peak_memory is not None else None
-        return result_row(
+        return _result_row(
             task,
             backend=backend,
             execution=execution,
@@ -115,8 +136,8 @@ def benchmark_mode(
             compile_ms=compile_ms,
             peak_memory_bytes=int(peak) if peak is not None else None,
         )
-    except Exception as exc:  # benchmark failures belong in the result artifact
-        return result_row(
+    except Exception as exc:
+        return _result_row(
             task,
             backend=backend,
             execution=execution,
@@ -126,92 +147,53 @@ def benchmark_mode(
         )
 
 
-def parse_args(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--backend", choices=("mlx", "torch"), required=True)
-    parser.add_argument("--preset", choices=tuple(DEFAULT_TIMING), default="smoke")
-    parser.add_argument("--case", action="append", choices=case_names(), dest="cases")
-    parser.add_argument("--phase", action="append", choices=("forward", "train"), dest="phases")
-    parser.add_argument("--warmup", type=int)
-    parser.add_argument("--samples", type=int)
-    parser.add_argument("--inner-repeats", type=int)
-    parser.add_argument("--set", action="append", default=[], dest="overrides")
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--device", choices=("auto", "mps", "cpu"), default="auto")
-    parser.add_argument("--torch-compile", action="store_true")
-    parser.add_argument(
-        "--mlx-kernels",
-        choices=("on", "off"),
-        default="on",
-        help="Enable generated e3nn Metal kernels in the MLX worker",
-    )
-    parser.add_argument("--fail-on-error", action="store_true")
-    parser.add_argument("--list-cases", action="store_true")
-    return parser.parse_args(argv)
-
-
 def main(argv=None) -> int:
     args = parse_args(argv)
     if args.list_cases:
         print("\n".join(case_names()))
         return 0
+
     workloads = get_workloads(args.preset, args.cases)
     apply_overrides(workloads, args.overrides)
     defaults = DEFAULT_TIMING[args.preset]
     warmup = defaults["warmup"] if args.warmup is None else args.warmup
     samples = defaults["samples"] if args.samples is None else args.samples
-    repeats = (
-        defaults["inner_repeats"]
-        if args.inner_repeats is None
-        else args.inner_repeats
-    )
     phases = args.phases or ["forward", "train"]
 
-    if args.backend == "mlx":
+    if args.backend == "torch-cpu":
+        from evals import torch_cases as implementation
+
+        implementation.configure()
+        device = "cpu"
+        execution = "eager"
+    else:
         import mlx.core as mx
 
         from evals import mlx_cases as implementation
 
-        implementation.configure(use_custom_kernels=args.mlx_kernels == "on")
+        implementation.configure(use_custom_kernels=args.backend == "mlx-kernel")
         mx.random.seed(0)
         device = str(mx.default_device())
-    else:
-        from evals import torch_cases as implementation
+        execution = "compiled"
 
-        implementation.configure(
-            device=args.device, enable_compile=args.torch_compile
-        )
-        device = implementation.backend_metadata()["device"]
-
-    result_backend = (
-        f"torch-{device}"
-        if args.backend == "torch"
-        else ("mlx-kernel" if args.mlx_kernels == "on" else "mlx-no-kernel")
-    )
-    metadata = new_run_metadata(args.preset, result_backend, device)
+    metadata = new_run_metadata(args.preset, args.backend, device)
     metadata["backend_details"] = implementation.backend_metadata()
-    metadata["timing"] = {
-        "warmup": warmup,
-        "samples": samples,
-        "inner_repeats": repeats,
-    }
+    metadata["timing"] = {"warmup": warmup, "samples": samples}
     metadata["overrides"] = args.overrides
-    if args.backend == "mlx":
-        metadata["custom_kernels"] = args.mlx_kernels == "on"
     results = []
+
     for name, config in workloads.items():
-        print(f"[{result_backend}] constructing {name}", flush=True)
+        print(f"[{args.backend}] constructing {name}", flush=True)
         try:
             task = implementation.BUILDERS[name](config)
         except Exception as exc:
             results.append(
                 {
                     "preset": args.preset,
-                    "backend": result_backend,
+                    "backend": args.backend,
                     "execution": "construction",
                     "phase": "setup",
                     "case": name,
-                    "family": name,
                     "description": "",
                     "config": config,
                     "item_count": 0,
@@ -224,27 +206,31 @@ def main(argv=None) -> int:
 
         modes = []
         if "forward" in phases:
-            modes.append(("eager", "forward", task.forward, None))
-            if task.compile_forward is not None:
-                modes.append(
-                    ("compiled", "forward", None, task.compile_forward)
+            modes.append(
+                (
+                    "forward",
+                    task.forward if execution == "eager" else None,
+                    task.compile_forward if execution == "compiled" else None,
                 )
-        if "train" in phases and task.train is not None:
-            modes.append(("eager", "train", task.train, None))
-            if task.compile_train is not None:
-                modes.append(("compiled", "train", None, task.compile_train))
-        for execution, phase, function, compiler in modes:
-            print(f"[{result_backend}] {name}: {execution} {phase}", flush=True)
-            row = benchmark_mode(
+            )
+        if "train" in phases:
+            modes.append(
+                (
+                    "train",
+                    task.train if execution == "eager" else None,
+                    task.compile_train if execution == "compiled" else None,
+                )
+            )
+        for phase, function, compiler in modes:
+            print(f"[{args.backend}] {name}: {phase}", flush=True)
+            row = _benchmark(
                 task,
-                backend=result_backend,
-                execution=execution,
+                backend=args.backend,
                 phase=phase,
                 function=function,
                 compiler=compiler,
                 warmup=warmup,
                 samples=samples,
-                inner_repeats=repeats,
             )
             row["preset"] = args.preset
             results.append(row)
@@ -255,8 +241,12 @@ def main(argv=None) -> int:
 
     write_document(args.output, metadata, results)
     failures = sum(row["status"] != "ok" for row in results)
-    print(json.dumps({"output": str(args.output), "rows": len(results), "failures": failures}))
-    return 1 if args.fail_on_error and failures else 0
+    print(
+        json.dumps(
+            {"output": str(args.output), "rows": len(results), "failures": failures}
+        )
+    )
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":

@@ -23,6 +23,8 @@ follow [Semantic Versioning](https://semver.org/).
 - Add seeded, replayable Torch/e3nn-versus-MLX randomized parity harnesses for
   tensor products and the major numerical operation families. The harnesses
   compare identical NumPy-generated inputs, forward values, and VJPs.
+- Consolidate performance evaluation into one three-way Torch-CPU,
+  general-MLX, and kernel-MLX suite with smoke and full presets.
 
 ## 0.1.0
 
