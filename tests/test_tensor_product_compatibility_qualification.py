@@ -272,3 +272,158 @@ def test_unshared_weights_require_a_leading_dimension() -> None:
         mx.zeros((0, 1)),
     )
     assert empty.shape == (0, 1)
+
+
+@pytest.mark.mlx
+def test_mixed_weighted_instruction_views_match_forward_and_weight_lists() -> None:
+    mx = mlx_backend._require()
+    product = o3.TensorProduct(
+        "2x0e + 2x0e + 2x0e",
+        "2x0e",
+        "2x0e + 3x0e + 2x0e",
+        [
+            (0, 0, 0, "uuu", False),
+            (1, 0, 1, "uvw", True),
+            (2, 0, 2, "uuu", False),
+            (0, 0, 0, "uvu", True),
+        ],
+        internal_weights=False,
+        irrep_normalization="none",
+        path_normalization="none",
+        use_custom_kernel=False,
+    )
+    weight = mx.arange(1, product.weight_numel + 1, dtype=mx.float32)
+    assert product.weight_numel == 16
+    first = product.weight_view_for_instruction(1, weight)
+    second = product.weight_view_for_instruction(3, weight)
+    assert first.shape == (2, 2, 3)
+    assert second.shape == (2, 2)
+    assert first.reshape(-1).tolist() == list(range(1, 13))
+    assert second.reshape(-1).tolist() == list(range(13, 17))
+    views = list(product.weight_views(weight))
+    assert len(views) == 2
+    assert _maximum_error(views[0], first) == 0.0
+    assert _maximum_error(views[1], second) == 0.0
+
+    left = _array(
+        product.irreps_in1,
+        mx.array([[0.17, -0.31, 0.73, 1.11, -1.37, 0.29]]),
+    )
+    right = _array(product.irreps_in2, mx.array([[0.41, -0.59]]))
+    flattened = product(left, right, weight).array
+    per_instruction = product(left, right, [first, second]).array
+    assert _maximum_error(flattened, per_instruction) == 0.0
+
+
+@pytest.mark.mlx
+def test_unshared_weight_broadcast_matrix_matches_flattened_execution() -> None:
+    mx = mlx_backend._require()
+    product = o3.TensorProduct(
+        "2x0e",
+        "3x0e",
+        "2x0e",
+        [(0, 0, 0, "uvu", True)],
+        internal_weights=False,
+        shared_weights=False,
+        use_custom_kernel=False,
+    )
+    left = mx.arange(12, dtype=mx.float32).reshape(2, 1, 3, 2) / 7.0
+    right = mx.arange(12, dtype=mx.float32).reshape(1, 4, 1, 3) / 11.0
+    weights = mx.arange(
+        2 * 4 * 3 * product.weight_numel,
+        dtype=mx.float32,
+    ).reshape(2, 4, 3, product.weight_numel) / 13.0
+    output = product(
+        _array(product.irreps_in1, left),
+        _array(product.irreps_in2, right),
+        weights,
+    ).array
+    assert output.shape == (2, 4, 3, product.irreps_out.dim)
+
+    flat_left = mx.broadcast_to(left, (2, 4, 3, 2)).reshape(-1, 2)
+    flat_right = mx.broadcast_to(right, (2, 4, 3, 3)).reshape(-1, 3)
+    expected = product(
+        _array(product.irreps_in1, flat_left),
+        _array(product.irreps_in2, flat_right),
+        weights.reshape(-1, product.weight_numel),
+    ).array.reshape(output.shape)
+    assert _maximum_error(output, expected) < 2e-6
+
+
+@pytest.mark.mlx
+@pytest.mark.parametrize("use_custom_kernel", [False, True])
+def test_weight_dtype_policy_is_consistent_across_execution_paths(
+    use_custom_kernel,
+) -> None:
+    mx = mlx_backend._require()
+    product = o3.TensorProduct(
+        "1x0e",
+        "1x0e",
+        "1x0e",
+        [(0, 0, 0, "uvw", True)],
+        internal_weights=False,
+        use_custom_kernel=use_custom_kernel,
+    )
+    left = _array("0e", mx.ones((2, 1), dtype=mx.float32))
+    right = _array("0e", mx.ones((2, 1), dtype=mx.float32))
+    with pytest.raises(TypeError, match="weights must match input dtype"):
+        product(left, right, mx.ones((1,), dtype=mx.float16))
+
+    half_product = o3.TensorProduct(
+        "1x0e",
+        "1x0e",
+        "1x0e",
+        [(0, 0, 0, "uvw", True)],
+        internal_weights=False,
+        use_custom_kernel=use_custom_kernel,
+    )
+    half_output = half_product(
+        _array("0e", mx.ones((2, 1), dtype=mx.float16)),
+        _array("0e", mx.ones((2, 1), dtype=mx.float16)),
+        mx.ones((1,), dtype=mx.float16),
+    )
+    assert half_output.dtype == mx.float16
+
+
+@pytest.mark.mlx
+def test_constructor_rejects_upstream_invalid_uvw_and_static_configurations() -> None:
+    with pytest.raises(ValueError, match="requires weights"):
+        o3.TensorProduct(
+            "1x0e",
+            "1x0e",
+            "1x0e",
+            [(0, 0, 0, "uvw", False)],
+            internal_weights=False,
+        )
+    with pytest.raises(IndexError, match="out of range"):
+        o3.TensorProduct(
+            "1x0e",
+            "1x0e",
+            "1x0e",
+            [(1, 0, 0, "uuu", False)],
+            internal_weights=False,
+        )
+    with pytest.raises(ValueError, match="parity mismatch"):
+        o3.TensorProduct(
+            "1x0e",
+            "1x0e",
+            "1x0o",
+            [(0, 0, 0, "uuu", False)],
+            internal_weights=False,
+        )
+    with pytest.raises(ValueError, match="selection rule"):
+        o3.TensorProduct(
+            "1x0e",
+            "1x0e",
+            "1x1e",
+            [(0, 0, 0, "uuu", False)],
+            internal_weights=False,
+        )
+    with pytest.raises(ValueError, match="multiplicit"):
+        o3.TensorProduct(
+            "2x0e",
+            "2x0e",
+            "1x0e",
+            [(0, 0, 0, "uuu", False)],
+            internal_weights=False,
+        )

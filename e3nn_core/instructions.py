@@ -301,6 +301,8 @@ def make_tensor_product_instructions(
             raise TypeError("tensor-product instruction indices must be integers")
         if not isinstance(has_weight, bool):
             raise TypeError("tensor-product instruction weight flag must be bool")
+        if mode == "uvw" and not has_weight:
+            raise ValueError("mode 'uvw' requires weights")
         if not isinstance(path_weight, (int, float)):
             raise TypeError("tensor-product path_weight must be numeric")
         if path_weight < 0:

@@ -385,6 +385,11 @@ def _numerical_tensor_product(
     if weights is not None:
         if weights.ndim < 1 or weights.shape[-1] != plan.weight_numel:
             raise ValueError(f"expected weight shape (..., {plan.weight_numel}), got {tuple(weights.shape)}")
+        if weights.dtype != left.dtype:
+            raise TypeError(
+                f"tensor product weights must match input dtype {left.dtype}, "
+                f"got {weights.dtype}"
+            )
         weight_leading_shape = tuple(int(size) for size in weights.shape[:-1])
     else:
         weight_leading_shape = ()
