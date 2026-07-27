@@ -399,6 +399,11 @@ def _numerical_tensor_product(
         left = IrrepsArray(left.irreps, mx.broadcast_to(left.array, (*leading_shape, left.irreps.dim)))
     if right.leading_shape != leading_shape:
         right = IrrepsArray(right.irreps, mx.broadcast_to(right.array, (*leading_shape, right.irreps.dim)))
+    if weights is not None and weight_leading_shape != leading_shape:
+        weights = mx.broadcast_to(
+            weights,
+            (*leading_shape, plan.weight_numel),
+        )
 
     left_chunks = left.chunk_arrays()
     right_chunks = right.chunk_arrays()
@@ -424,7 +429,6 @@ def _numerical_tensor_product(
             left.array.dtype,
         )
     output_blocks = [mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype) for part in plan.irreps_out]
-    grouped_outputs: list[list[Any]] = [[] for _ in plan.irreps_out]
     for instruction_index, inst in enumerate(plan.instructions):
         left_mul = plan.irreps_in1[inst.input1_index].mul
         right_mul = plan.irreps_in2[inst.input2_index].mul
@@ -438,16 +442,7 @@ def _numerical_tensor_product(
             if weight_slice is not None:
                 raw_weight = weights[..., weight_slice]
         contribution = _apply_connection_mode(inst, pair, raw_weight, pair.dtype)
-        if weights is None:
-            grouped_outputs[output_index].append(contribution)
-        else:
-            output_blocks[output_index] = output_blocks[output_index] + contribution
-
-    if weights is None:
-        output_blocks = [
-            mx.concatenate(blocks, axis=-2) if blocks else mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype)
-            for part, blocks in zip(plan.irreps_out, grouped_outputs, strict=True)
-        ]
+        output_blocks[output_index] = output_blocks[output_index] + contribution
     if not output_blocks:
         return IrrepsArray(plan.irreps_out, mx.zeros((*leading_shape, 0), dtype=left.array.dtype))
     array = mx.concatenate(
@@ -504,13 +499,16 @@ class TensorProduct(mlx_module_base()):
     ) -> None:
         super().__init__()
         mx, _ = require_mlx()
-        self.irreps_in1 = Irreps(irreps_in1).remove_zero_multiplicities()
-        self.irreps_in2 = Irreps(irreps_in2).remove_zero_multiplicities()
-        self.irreps_out = Irreps(irreps_out).remove_zero_multiplicities()
+        original_irreps_in1 = Irreps(irreps_in1)
+        original_irreps_in2 = Irreps(irreps_in2)
+        original_irreps_out = Irreps(irreps_out)
+        self.irreps_in1 = original_irreps_in1.remove_zero_multiplicities()
+        self.irreps_in2 = original_irreps_in2.remove_zero_multiplicities()
+        self.irreps_out = original_irreps_out.remove_zero_multiplicities()
         self.instructions = make_tensor_product_instructions(
-            self.irreps_in1,
-            self.irreps_in2,
-            self.irreps_out,
+            original_irreps_in1,
+            original_irreps_in2,
+            original_irreps_out,
             instructions,
             in1_var=in1_var,
             in2_var=in2_var,
@@ -759,6 +757,10 @@ class TensorProduct(mlx_module_base()):
             if tuple(weight.shape) != (self.weight_numel,):
                 raise ValueError(f"Expected shared weight shape {(self.weight_numel,)}, got {tuple(weight.shape)}")
         else:
+            if weight.ndim < 2:
+                raise ValueError(
+                    "shared_weights=False requires weights with a batch dimension"
+                )
             if weight.shape[-1] != self.weight_numel:
                 raise ValueError(f"Expected unshared weight shape (..., {self.weight_numel}), got {tuple(weight.shape)}")
         return weight

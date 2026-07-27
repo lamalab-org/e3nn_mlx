@@ -240,24 +240,56 @@ def make_tensor_product_instructions(
     in2_var: Iterable[float] | None = None,
     out_var: Iterable[float] | None = None,
 ) -> tuple[TensorProductInstruction, ...]:
-    left = Irreps(irreps_in1).remove_zero_multiplicities()
-    right = Irreps(irreps_in2).remove_zero_multiplicities()
-    output = Irreps(irreps_out).remove_zero_multiplicities()
+    original_left = Irreps(irreps_in1)
+    original_right = Irreps(irreps_in2)
+    original_output = Irreps(irreps_out)
+    left = original_left.remove_zero_multiplicities()
+    right = original_right.remove_zero_multiplicities()
+    output = original_output.remove_zero_multiplicities()
+    left_indices = {
+        original: compact
+        for compact, original in enumerate(
+            index for index, part in enumerate(original_left) if part.mul > 0
+        )
+    }
+    right_indices = {
+        original: compact
+        for compact, original in enumerate(
+            index for index, part in enumerate(original_right) if part.mul > 0
+        )
+    }
+    output_indices = {
+        original: compact
+        for compact, original in enumerate(
+            index for index, part in enumerate(original_output) if part.mul > 0
+        )
+    }
     raw: list[TensorProductInstruction] = []
     path_weights: list[float] = []
 
     if path_normalization == "component":
         path_normalization = "element"
 
-    in1_var_list = [1.0 for _ in range(len(left))] if in1_var is None else [float(value) for value in in1_var]
-    in2_var_list = [1.0 for _ in range(len(right))] if in2_var is None else [float(value) for value in in2_var]
-    out_var_list = [1.0 for _ in range(len(output))] if out_var is None else [float(value) for value in out_var]
-    if len(in1_var_list) != len(left):
-        raise ValueError("len(in1_var) must equal len(irreps_in1)")
-    if len(in2_var_list) != len(right):
-        raise ValueError("len(in2_var) must equal len(irreps_in2)")
-    if len(out_var_list) != len(output):
-        raise ValueError("len(out_var) must equal len(irreps_out)")
+    def compact_variances(values, original, compact, name):
+        if values is None:
+            return [1.0 for _ in compact]
+        parsed = [float(value) for value in values]
+        if len(parsed) == len(original):
+            return [
+                value
+                for value, part in zip(parsed, original, strict=True)
+                if part.mul > 0
+            ]
+        if len(parsed) == len(compact):
+            return parsed
+        raise ValueError(
+            f"len({name}) must match the irreps before or after removing "
+            "zero multiplicities"
+        )
+
+    in1_var_list = compact_variances(in1_var, original_left, left, "in1_var")
+    in2_var_list = compact_variances(in2_var, original_right, right, "in2_var")
+    out_var_list = compact_variances(out_var, original_output, output, "out_var")
 
     for instruction in instructions:
         if len(instruction) == 5:
@@ -273,8 +305,23 @@ def make_tensor_product_instructions(
             raise TypeError("tensor-product path_weight must be numeric")
         if path_weight < 0:
             raise ValueError("tensor-product path_weight must be non-negative")
-        if not 0 <= i_in1 < len(left) or not 0 <= i_in2 < len(right) or not 0 <= i_out < len(output):
+        if (
+            not 0 <= i_in1 < len(original_left)
+            or not 0 <= i_in2 < len(original_right)
+            or not 0 <= i_out < len(original_output)
+        ):
             raise IndexError(f"tensor-product instruction index out of range: {instruction!r}")
+        if (
+            original_left[i_in1].mul == 0
+            or original_right[i_in2].mul == 0
+            or original_output[i_out].mul == 0
+        ):
+            raise ValueError(
+                "tensor-product instructions cannot reference zero-multiplicity irreps"
+            )
+        i_in1 = left_indices[i_in1]
+        i_in2 = right_indices[i_in2]
+        i_out = output_indices[i_out]
         part1 = left[i_in1]
         part2 = right[i_in2]
         part_out = output[i_out]
