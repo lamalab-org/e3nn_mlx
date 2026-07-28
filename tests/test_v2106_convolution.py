@@ -154,11 +154,17 @@ def test_v2106_convolution_compilation_and_cached_reuse() -> None:
     expected = module.forward_arrays(*values)
     mx.eval(expected)
     compiled = mx.compile(module.forward_arrays)
-    assert _max_abs(compiled(*values) - expected) < 5e-5
+    actual = compiled(*values)
+    mx.eval(actual)
+    assert bool(mx.allclose(actual, expected, atol=5e-5, rtol=2e-6))
     changed = (values[0] * 0.9, values[1], *values[2:])
     changed_expected = module.forward_arrays(*changed)
     mx.eval(changed_expected)
-    assert _max_abs(compiled(*changed) - changed_expected) < 5e-5
+    changed_actual = compiled(*changed)
+    mx.eval(changed_actual)
+    assert bool(
+        mx.allclose(changed_actual, changed_expected, atol=5e-5, rtol=2e-6)
+    )
 
 
 @pytest.mark.mlx

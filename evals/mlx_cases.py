@@ -332,6 +332,10 @@ def _model_dispatch(*, supports_kernels: bool) -> str:
         return "general-mlx"
     if not supports_kernels:
         return "general-mlx (model has no kernel toggle)"
+    from e3nn_mlx.compat import mlx_metal_available
+
+    if not mlx_metal_available():
+        return "general-mlx (kernel fallback)"
     return "mixed-model-kernels"
 
 

@@ -163,6 +163,7 @@ def test_backend_builders_match_the_documented_case_set() -> None:
 @pytest.mark.mlx
 def test_model_benchmarks_report_kernel_scope() -> None:
     from evals import mlx_cases
+    from e3nn_mlx.compat import mlx_metal_available
 
     config = {
         "nodes": 8,
@@ -178,13 +179,19 @@ def test_model_benchmarks_report_kernel_scope() -> None:
     mlx_cases.configure(use_custom_kernels=False)
 
     assert gate.dispatch == "general-mlx (model has no kernel toggle)"
-    assert simple.dispatch == "mixed-model-kernels"
-    assert attributed.dispatch == "mixed-model-kernels"
+    expected = (
+        "mixed-model-kernels"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
+    )
+    assert simple.dispatch == expected
+    assert attributed.dispatch == expected
 
 
 @pytest.mark.mlx
 def test_mlx_benchmark_reports_actual_tensor_product_dispatch() -> None:
     from evals import mlx_cases
+    from e3nn_mlx.compat import mlx_metal_available
 
     mlx_cases.configure(use_custom_kernels=True)
     small = mlx_cases.build_fully_connected_tensor_product(
@@ -198,6 +205,30 @@ def test_mlx_benchmark_reports_actual_tensor_product_dispatch() -> None:
         {"items": 16, "mul": 8, "lmax": 2}
     )
 
-    assert small.dispatch == "metal-scalar-paths"
+    expected = (
+        "metal-scalar-paths"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
+    )
+    assert small.dispatch == expected
     assert dense.dispatch == "general-mlx (kernel fallback)"
     assert general.dispatch == "general-mlx"
+
+
+@pytest.mark.mlx
+def test_mlx_benchmark_reports_non_metal_kernel_fallback(monkeypatch) -> None:
+    import e3nn_mlx.compat as compat
+    import e3nn_mlx.ops_tp as tp_module
+    from evals import mlx_cases
+
+    monkeypatch.setattr(compat, "mlx_metal_available", lambda: False)
+    monkeypatch.setattr(tp_module, "mlx_metal_available", lambda: False)
+    mlx_cases.configure(use_custom_kernels=True)
+    task = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 16, "mul": 8, "lmax": 2}
+    )
+    model_dispatch = mlx_cases._model_dispatch(supports_kernels=True)
+    mlx_cases.configure(use_custom_kernels=False)
+
+    assert task.dispatch == "general-mlx (kernel fallback)"
+    assert model_dispatch == "general-mlx (kernel fallback)"
