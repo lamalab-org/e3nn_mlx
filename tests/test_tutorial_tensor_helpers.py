@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from e3nn_mlx import o3
+from e3nn_mlx import IrrepsArray, o3
 from e3nn_mlx.backend import mlx_backend
 from tutorials import CartesianTensor, SphericalTensor
 
@@ -66,6 +66,11 @@ def test_spherical_tensor_accepts_historical_explicit_lmax() -> None:
 
     assert tensor.lmax == 1
     assert tensor.shape == (4,)
+    assert isinstance(tensor, IrrepsArray)
+    assert tensor.as_irreps_array() is tensor
+    norms = o3.Norm()(tensor)
+    assert isinstance(norms, IrrepsArray)
+    assert norms.shape == (2,)
     with pytest.raises(ValueError, match="requires 9 coefficients"):
         SphericalTensor(signal, 2)
     with pytest.raises(ValueError, match="non-negative integer"):
@@ -170,6 +175,7 @@ def test_spherical_tensor_full_product_preserves_tutorial_slice_order() -> None:
     product = SphericalTensor(signal_1, 1) @ SphericalTensor(signal_2, 1)
 
     assert product.Rs == [(2, 0, 0), (3, 1, 0), (1, 2, 0)]
+    assert isinstance(product, IrrepsArray)
     assert product.shape == (16,)
     assert _max_abs(product.array[:2]) < 1e-6
     assert _max_abs(product.array[2:5]) > 0.1
@@ -242,6 +248,8 @@ def test_cartesian_rank_two_round_trip_and_metadata() -> None:
     representations, basis = tensor.to_irrep_transformation()
     converted = tensor.to_irrep_tensor()
 
+    assert isinstance(tensor.decomposition, o3.ReducedTensorProducts)
+    assert isinstance(converted, IrrepsArray)
     assert representations == [(1, 0, 1), (1, 1, 1), (1, 2, 1)]
     assert basis.shape == (9, 3, 3)
     assert converted.Rs == representations

@@ -2,8 +2,9 @@
 
 These helpers intentionally live with the tutorial rather than in the public
 ``e3nn_mlx`` API.  They reproduce the small convenience layer used by the old
-notebook while delegating representation theory and numerical work to the
-modern :mod:`e3nn_mlx.o3` implementation.
+notebook while using :class:`e3nn_mlx.IrrepsArray` as their value container and
+delegating representation theory and numerical work to
+:mod:`e3nn_mlx.o3`.
 """
 
 from __future__ import annotations
@@ -43,11 +44,12 @@ def _coerce_irreps(spec: o3.Irreps | str | Iterable[tuple[int, ...]]) -> o3.Irre
     return o3.Irreps(parts)
 
 
-class IrrepTensor:
+class IrrepTensor(IrrepsArray):
     """An MLX array paired with irreducible-representation metadata.
 
-    ``Rs`` is provided for compatibility with the old tutorial. New code can
-    use :attr:`irreps` and :meth:`as_irreps_array` directly.
+    This is an :class:`e3nn_mlx.IrrepsArray` with the historical ``tensor`` and
+    ``Rs`` names used by the tutorial. It can therefore be passed directly to
+    representation-aware :mod:`e3nn_mlx.o3` operations.
     """
 
     def __init__(
@@ -56,21 +58,16 @@ class IrrepTensor:
         representations: o3.Irreps | str | Iterable[tuple[int, ...]],
     ) -> None:
         representation_spec = representations
-        self._legacy_rs_override = None
+        legacy_rs_override = None
         if not isinstance(representations, (o3.Irreps, str)):
             representation_spec = list(representations)
             if any(len(item) == 3 and item[2] == 0 for item in representation_spec):
-                self._legacy_rs_override = [
+                legacy_rs_override = [
                     (item[0], item[1], item[2] if len(item) == 3 else 0)
                     for item in representation_spec
                 ]
-        self.irreps = _coerce_irreps(representation_spec)
-        self.array = mx.array(tensor)
-        if self.array.ndim == 0 or self.array.shape[-1] != self.irreps.dim:
-            raise ValueError(
-                f"last tensor dimension {self.array.shape[-1] if self.array.ndim else None} "
-                f"does not match irreps dimension {self.irreps.dim}"
-            )
+        super().__init__(_coerce_irreps(representation_spec), mx.array(tensor))
+        object.__setattr__(self, "_legacy_rs_override", legacy_rs_override)
 
     @classmethod
     def from_irreps_array(cls, value: IrrepsArray) -> "IrrepTensor":
@@ -97,7 +94,9 @@ class IrrepTensor:
         return self.array.dtype
 
     def as_irreps_array(self) -> IrrepsArray:
-        return IrrepsArray(self.irreps, self.array)
+        """Return this value through its public e3nn-mlx base type."""
+
+        return self
 
     def __repr__(self) -> str:
         return f"IrrepTensor(shape={self.shape}, irreps={self.irreps})"
@@ -150,9 +149,9 @@ class SphericalTensor(IrrepTensor):
             p_arg = -1
         if p_val not in (-1, 1) or p_arg not in (-1, 1):
             raise ValueError("p_val and p_arg must each be +1 or -1")
-        self.lmax = lmax
-        self.p_val = p_val
-        self.p_arg = p_arg
+        object.__setattr__(self, "lmax", lmax)
+        object.__setattr__(self, "p_val", p_val)
+        object.__setattr__(self, "p_arg", p_arg)
         irreps = o3.Irreps(
             (1, (degree, p_val * p_arg**degree))
             for degree in range(self.lmax + 1)
@@ -291,8 +290,8 @@ class SphericalTensor(IrrepTensor):
         if not isinstance(other, SphericalTensor):
             return NotImplemented
         product = o3.FullTensorProduct(self.irreps, other.irreps)(
-            self.as_irreps_array(),
-            other.as_irreps_array(),
+            self,
+            other,
         )
 
         # Modern e3nn keeps polar and axial copies separate because their O(3)
@@ -466,7 +465,14 @@ class SphericalTensor(IrrepTensor):
 
 
 class CartesianTensor:
-    """Convert rank-N Cartesian tensors into the coupled irrep basis."""
+    """Convert rank-N Cartesian tensors with ``o3.ReducedTensorProducts``.
+
+    Unlike :class:`SphericalTensor`, this object stores a Cartesian value whose
+    axes have not yet been converted to a single irrep dimension, so it is not
+    itself an :class:`IrrepsArray`. Its :attr:`decomposition` is the actual
+    e3nn-mlx operator and :meth:`to_irrep_tensor` returns an ``IrrepsArray``
+    subclass that can be consumed directly by the rest of the library.
+    """
 
     def __init__(
         self,
@@ -484,14 +490,17 @@ class CartesianTensor:
         self.formula = labels if formula is None else formula.replace(" ", "")
         if self.formula.split("=", 1)[0].lstrip("+-") != labels:
             raise ValueError(f"formula must start with {labels!r} for a rank-{self.array.ndim} tensor")
-        self._decomposition = o3.ReducedTensorProducts(self.formula, **{labels[0]: "1o"})
+        self.decomposition = o3.ReducedTensorProducts(
+            self.formula,
+            **{labels[0]: "1o"},
+        )
         self.legacy_basis = bool(legacy_basis)
         if self.legacy_basis and self.array.ndim != 2:
             raise ValueError("legacy_basis is currently defined for rank-two Cartesian tensors")
 
     @property
     def change_of_basis(self):
-        basis = self._decomposition.change_of_basis
+        basis = self.decomposition.change_of_basis
         if not self.legacy_basis:
             return basis
 
@@ -515,7 +524,7 @@ class CartesianTensor:
 
     @property
     def irreps(self) -> o3.Irreps:
-        return self._decomposition.irreps_out
+        return self.decomposition.irreps_out
 
     @property
     def Rs(self) -> list[tuple[int, int, int]]:

@@ -35,6 +35,13 @@ is:
 from tensor_helpers import CartesianTensor, IrrepTensor, SphericalTensor
 ```
 
+These are compatibility helpers, not an independent tensor engine.
+`IrrepTensor` and `SphericalTensor` inherit from
+`e3nn_mlx.IrrepsArray`, so they can be passed directly to the library's
+representation-aware operations. `CartesianTensor` keeps a Cartesian value
+until conversion and exposes its `e3nn_mlx.o3.ReducedTensorProducts` operator
+as `decomposition`; `to_irrep_tensor()` returns an `IrrepsArray` subclass.
+
 The helpers implement the tutorial's `.Rs`, `to_irrep_transformation`,
 `to_irrep_tensor`, `from_irrep_tensor`, `from_geometry`, and `plot` behavior.
 They use the current e3nn basis and return MLX arrays. Convert plotting outputs
