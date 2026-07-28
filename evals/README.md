@@ -6,7 +6,8 @@ This directory has two jobs:
    MLX, and compiled MLX with generated kernels;
 2. qualify numerical compatibility with seeded randomized parity tests.
 
-The performance runner always launches exactly these isolated workers:
+For each independent repetition, the performance runner launches exactly these
+isolated workers:
 
 | Result label | Implementation |
 | --- | --- |
@@ -56,13 +57,28 @@ samples:
 .venv/bin/python evals/run.py --preset full
 ```
 
-The full preset measures both forward and training latency. To reduce memory or
-runtime while investigating one operation, select cases or phases:
+The full preset measures both forward and training latency. It runs five
+independent repetitions by default, with a fresh worker process for every
+backend and repetition. To reduce memory or runtime while investigating one
+operation, select cases or phases:
 
 ```bash
 .venv/bin/python evals/run.py --preset full \
   --case weighted_tensor_product_uvu \
   --phase forward
+```
+
+Override the independent repetition count when doing exploratory work:
+
+```bash
+.venv/bin/python evals/run.py --preset full --repeats 2
+```
+
+The smoke preset uses one repetition to stay quick. It can also exercise the
+repeat-and-aggregate path explicitly:
+
+```bash
+.venv/bin/python evals/run.py --preset smoke --repeats 5
 ```
 
 Settings can be overridden without editing source:
@@ -114,7 +130,10 @@ Run only the end-to-end models with:
 Torch CPU uses `os.cpu_count()` threads. MLX uses compiled execution for both
 workers, while Torch uses upstream eager execution. Warmups occur before
 recording. Every MLX sample is synchronized before its wall-clock interval
-ends. Reports use the median and retain raw samples and quartiles.
+ends. Each worker retains its raw samples and within-run quartiles. Report bars
+show the median of the independent run medians, and their whiskers show the
+25th–75th percentile range across those run medians. Speedup error bars use
+paired Torch/MLX repetitions.
 Every result row also records the selected execution path. A kernel-enabled
 worker that crosses a dispatch threshold is reported as
 `general-mlx (kernel fallback)` rather than being mistaken for an executed
@@ -126,9 +145,14 @@ Each run creates:
 
 ```text
 evals/results/<timestamp>/
-├── torch-cpu.json
-├── mlx.json
-├── mlx-kernel.json
+├── repeat-01/
+│   ├── torch-cpu.json
+│   ├── mlx.json
+│   └── mlx-kernel.json
+├── repeat-02/
+│   └── ...
+├── repeat-05/
+│   └── ...
 ├── combined.json
 └── plots/
     ├── latency_forward.svg

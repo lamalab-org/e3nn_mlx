@@ -8,12 +8,14 @@ import csv
 from html import escape
 import json
 from pathlib import Path
+import statistics
 import sys
+from typing import NamedTuple
 
 if __package__ in (None, ""):
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from evals.common import load_documents
+from evals.common import load_documents, summarize
 
 
 BACKENDS = ("torch-cpu", "mlx", "mlx-kernel")
@@ -24,6 +26,15 @@ COLORS = {
     "speedup": "#059669",
     "slowdown": "#dc2626",
 }
+
+
+class BarEntry(NamedTuple):
+    label: str
+    value: float
+    color_key: str
+    lower: float
+    upper: float
+    repeat_count: int
 
 
 def successful_rows(rows, phase: str):
@@ -41,36 +52,75 @@ def successful_rows(rows, phase: str):
     return selected
 
 
+def _run_summary(values) -> dict[str, float]:
+    return summarize(float(value) for value in values)
+
+
 def latency_entries(rows, phase: str):
-    return [
-        (
-            f"{row['case']} · {row['backend']}",
-            float(row["median_ms"]),
-            row["backend"],
+    grouped = {}
+    for row in successful_rows(rows, phase):
+        grouped.setdefault((row["case"], row["backend"]), []).append(
+            float(row["median_ms"])
         )
-        for row in successful_rows(rows, phase)
-    ]
+    entries = []
+    for (case, backend), medians in sorted(
+        grouped.items(),
+        key=lambda item: (item[0][0], BACKENDS.index(item[0][1])),
+    ):
+        summary = _run_summary(medians)
+        entries.append(
+            BarEntry(
+                f"{case} · {backend}",
+                summary["median_ms"],
+                backend,
+                summary["p25_ms"],
+                summary["p75_ms"],
+                len(medians),
+            )
+        )
+    return entries
 
 
 def speedup_entries(rows, phase: str):
-    grouped = {}
+    grouped: dict[str, dict[str, dict[int, dict]]] = {}
+    occurrence: dict[tuple[str, str], int] = {}
     for row in successful_rows(rows, phase):
-        grouped.setdefault(row["case"], {})[row["backend"]] = row
+        key = (row["case"], row["backend"])
+        fallback = occurrence.get(key, 0)
+        repeat_index = int(row.get("repeat_index", fallback))
+        occurrence[key] = fallback + 1
+        grouped.setdefault(row["case"], {}).setdefault(row["backend"], {})[
+            repeat_index
+        ] = row
     entries = []
     for case, group in sorted(grouped.items()):
-        reference = group.get("torch-cpu")
-        if reference is None:
+        references = group.get("torch-cpu")
+        if not references:
             continue
         for backend in ("mlx", "mlx-kernel"):
-            candidate = group.get(backend)
-            if candidate is None:
+            candidates = group.get(backend)
+            if not candidates:
                 continue
-            ratio = float(reference["median_ms"]) / float(candidate["median_ms"])
+            ratios = [
+                float(references[index]["median_ms"])
+                / float(candidates[index]["median_ms"])
+                for index in sorted(references.keys() & candidates.keys())
+            ]
+            if not ratios:
+                continue
+            summary = _run_summary(ratios)
             entries.append(
-                (
+                BarEntry(
                     f"{case} · {backend} vs torch-cpu",
-                    ratio,
-                    "speedup" if ratio >= 1.0 else "slowdown",
+                    summary["median_ms"],
+                    (
+                        "speedup"
+                        if summary["median_ms"] >= 1.0
+                        else "slowdown"
+                    ),
+                    summary["p25_ms"],
+                    summary["p75_ms"],
+                    len(ratios),
                 )
             )
     return entries
@@ -81,18 +131,18 @@ def horizontal_bars(
     *,
     title: str,
     subtitle: str,
-    entries: list[tuple[str, float, str]],
+    entries: list[BarEntry],
     unit: str,
     reference: float | None = None,
 ) -> None:
     width = 1280
     left = 510
-    right = 150
+    right = 300
     top = 100
     row_height = 31
     height = max(220, top + row_height * max(1, len(entries)) + 70)
     plot_width = width - left - right
-    maximum = max((value for _, value, _ in entries), default=1.0)
+    maximum = max((entry.upper for entry in entries), default=1.0)
     if reference is not None:
         maximum = max(maximum, reference)
     maximum = maximum * 1.08 if maximum > 0 else 1.0
@@ -115,10 +165,19 @@ def horizontal_bars(
                 'font-size="12" fill="#5f6368">parity</text>',
             ]
         )
-    for index, (label, value, color_key) in enumerate(entries):
+    for index, entry in enumerate(entries):
+        label, value, color_key = entry[:3]
         y = top + index * row_height
         bar_width = plot_width * value / maximum
-        formatted = f"{value:.3f} {unit}" if unit == "ms" else f"{value:.2f}×"
+        lower_x = left + plot_width * entry.lower / maximum
+        upper_x = left + plot_width * entry.upper / maximum
+        formatted = (
+            f"{value:.3f} {unit}"
+            if unit == "ms"
+            else f"{value:.2f}×"
+        )
+        if entry.repeat_count > 1:
+            formatted += f" (IQR {entry.lower:.3f}–{entry.upper:.3f}, n={entry.repeat_count})"
         elements.extend(
             [
                 f'<text x="{left - 12}" y="{y + 18}" text-anchor="end" '
@@ -126,6 +185,13 @@ def horizontal_bars(
                 f'fill="#303238">{escape(label)}</text>',
                 f'<rect x="{left}" y="{y + 4}" width="{bar_width:.2f}" '
                 f'height="20" rx="3" fill="{COLORS[color_key]}"/>',
+                f'<line class="error-bar" x1="{lower_x:.2f}" y1="{y + 14}" '
+                f'x2="{upper_x:.2f}" y2="{y + 14}" stroke="#111827" '
+                'stroke-width="2"/>',
+                f'<line class="error-bar" x1="{lower_x:.2f}" y1="{y + 9}" '
+                f'x2="{lower_x:.2f}" y2="{y + 19}" stroke="#111827"/>',
+                f'<line class="error-bar" x1="{upper_x:.2f}" y1="{y + 9}" '
+                f'x2="{upper_x:.2f}" y2="{y + 19}" stroke="#111827"/>',
                 f'<text x="{left + bar_width + 7:.2f}" y="{y + 19}" '
                 f'font-family="system-ui" font-size="12" fill="#303238">'
                 f'{formatted}</text>',
@@ -133,6 +199,68 @@ def horizontal_bars(
         )
     elements.append("</svg>")
     path.write_text("\n".join(elements) + "\n")
+
+
+def aggregate_rows(rows, *, expected_repeats: int | None = None):
+    grouped = {}
+    for row in rows:
+        key = (row.get("phase"), row.get("case"), row.get("backend"))
+        grouped.setdefault(key, []).append(row)
+    aggregated = []
+    for _, group in sorted(grouped.items(), key=lambda item: item[0]):
+        successful = [
+            row
+            for row in group
+            if row.get("status") == "ok" and row.get("median_ms") is not None
+        ]
+        output = dict(successful[0] if successful else group[0])
+        repeat_count = max(len(group), expected_repeats or 0)
+        output["repeat_count"] = repeat_count
+        output["successful_repeats"] = len(successful)
+        if successful:
+            timing = _run_summary(row["median_ms"] for row in successful)
+            output.update(timing)
+            compile_values = [
+                float(row["compile_ms"])
+                for row in successful
+                if row.get("compile_ms") is not None
+            ]
+            output["compile_ms"] = (
+                statistics.median(compile_values) if compile_values else None
+            )
+            output["status"] = (
+                "ok" if len(successful) == repeat_count else "partial"
+            )
+            output["error"] = None
+            output["items_per_second"] = (
+                float(output["item_count"])
+                / (float(output["median_ms"]) / 1_000)
+                if output.get("item_count") is not None
+                and float(output["median_ms"]) > 0
+                else None
+            )
+            memory_values = [
+                int(row["peak_memory_bytes"])
+                for row in successful
+                if row.get("peak_memory_bytes") is not None
+            ]
+            output["peak_memory_bytes"] = (
+                int(statistics.median(memory_values))
+                if memory_values
+                else None
+            )
+        else:
+            output["status"] = "error"
+            output["median_ms"] = None
+            output["p25_ms"] = None
+            output["p75_ms"] = None
+            output["error"] = "; ".join(
+                str(row.get("error"))
+                for row in group
+                if row.get("error")
+            )
+        aggregated.append(output)
+    return aggregated
 
 
 def write_csv(path: Path, rows) -> None:
@@ -146,6 +274,8 @@ def write_csv(path: Path, rows) -> None:
         "median_ms",
         "p25_ms",
         "p75_ms",
+        "repeat_count",
+        "successful_repeats",
         "compile_ms",
         "items_per_second",
         "peak_memory_bytes",
@@ -189,6 +319,15 @@ def write_html(path: Path, rows, generated: list[str]) -> None:
             if row.get("compile_ms") is not None
             else "—"
         )
+        interval = (
+            f"{float(row['p25_ms']):.3f}–{float(row['p75_ms']):.3f}"
+            if row.get("p25_ms") is not None
+            and row.get("p75_ms") is not None
+            else "—"
+        )
+        repetitions = (
+            f"{row.get('successful_repeats', 0)}/{row.get('repeat_count', 1)}"
+        )
         table_rows.append(
             "<tr>"
             f"<td>{escape(str(row.get('phase', '')))}</td>"
@@ -196,7 +335,8 @@ def write_html(path: Path, rows, generated: list[str]) -> None:
             f"<td>{escape(str(row.get('backend', '')))}</td>"
             f"<td>{escape(str(row.get('execution', '')))}</td>"
             f"<td>{escape(str(row.get('dispatch', '')))}</td>"
-            f"<td>{median}</td><td>{compile_ms}</td>"
+            f"<td>{median}</td><td>{interval}</td><td>{repetitions}</td>"
+            f"<td>{compile_ms}</td>"
             f"<td>{escape(str(row.get('status', '')))}</td>"
             "</tr>"
         )
@@ -222,7 +362,8 @@ execution; only <code>mlx-kernel</code> enables generated kernels.</p>
         + """
 <h2>Measurements</h2>
 <table><thead><tr><th>Phase</th><th>Case</th><th>Backend</th>
-<th>Execution</th><th>Selected path</th><th>Steady median (ms)</th><th>Compile (ms)</th>
+<th>Execution</th><th>Selected path</th><th>Run median (ms)</th>
+<th>Between-run IQR (ms)</th><th>Successful runs</th><th>Compile (ms)</th>
 <th>Status</th></tr></thead><tbody>
 """
         + "\n".join(table_rows)
@@ -239,7 +380,18 @@ def parse_args(argv=None):
 
 def main(argv=None) -> int:
     args = parse_args(argv)
-    _, rows = load_documents(args.results)
+    metadata, rows = load_documents(args.results)
+    requested_repeats = max(
+        (
+            int(document.get("repeat_count_requested", 0))
+            for document in metadata
+        ),
+        default=0,
+    )
+    aggregated = aggregate_rows(
+        rows,
+        expected_repeats=requested_repeats or None,
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     generated = []
     for phase in ("forward", "train"):
@@ -247,7 +399,10 @@ def main(argv=None) -> int:
         horizontal_bars(
             args.output_dir / latency_name,
             title=f"{phase.title()} steady-state latency",
-            subtitle="Lower is better; synchronized median per invocation.",
+            subtitle=(
+                "Lower is better; bars are medians of independent runs "
+                "and whiskers show the between-run IQR."
+            ),
             entries=latency_entries(rows, phase),
             unit="ms",
         )
@@ -256,14 +411,17 @@ def main(argv=None) -> int:
         horizontal_bars(
             args.output_dir / speedup_name,
             title=f"{phase.title()} speedup over Torch CPU",
-            subtitle="Above 1× favors MLX; below 1× favors Torch CPU.",
+            subtitle=(
+                "Paired by repeat; bars are median speedups and whiskers "
+                "show the between-run IQR."
+            ),
             entries=speedup_entries(rows, phase),
             unit="x",
             reference=1.0,
         )
         generated.append(speedup_name)
-    write_csv(args.output_dir / "summary.csv", rows)
-    write_html(args.output_dir / "report.html", rows, generated)
+    write_csv(args.output_dir / "summary.csv", aggregated)
+    write_html(args.output_dir / "report.html", aggregated, generated)
     print(f"Report: {args.output_dir / 'report.html'}")
     return 0
 

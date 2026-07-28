@@ -7,8 +7,13 @@ import json
 import pytest
 
 from evals.common import SCHEMA_VERSION, load_documents, summarize, write_document
-from evals.plot_results import main as plot_main, speedup_entries
-from evals.run import WORKERS, parse_args, worker_command
+from evals.plot_results import (
+    aggregate_rows,
+    latency_entries,
+    main as plot_main,
+    speedup_entries,
+)
+from evals.run import WORKERS, parse_args, repeat_count, worker_command
 from evals.run_backend import apply_overrides, parse_args as parse_worker_args
 from evals.workloads import case_names, get_workloads, ring_edges, spherical_irreps
 
@@ -87,6 +92,7 @@ def test_runner_always_builds_exactly_three_worker_commands(tmp_path) -> None:
         ]
     )
     assert WORKERS == ("torch-cpu", "mlx", "mlx-kernel")
+    assert repeat_count(args) == 5
     for backend in WORKERS:
         interpreter = tmp_path / backend
         command = worker_command(
@@ -100,6 +106,16 @@ def test_runner_always_builds_exactly_three_worker_commands(tmp_path) -> None:
         assert "--device" not in command
         assert "--mlx-kernels" not in command
         assert "--torch-compile" not in command
+
+
+def test_runner_repeat_defaults_and_validation() -> None:
+    assert repeat_count(parse_args(["--preset", "smoke"])) == 1
+    assert repeat_count(parse_args(["--preset", "full"])) == 5
+    assert repeat_count(
+        parse_args(["--preset", "full", "--repeats", "3"])
+    ) == 3
+    with pytest.raises(ValueError, match="positive"):
+        repeat_count(parse_args(["--repeats", "0"]))
 
 
 def test_worker_cli_has_only_the_three_public_backend_labels() -> None:
@@ -151,6 +167,61 @@ def test_result_round_trip_speedups_and_compact_plots(tmp_path) -> None:
     assert "Selected path" in report
     assert "general-mlx" in report
     assert json.loads(result_path.read_text())["metadata"]["schema_version"] == 1
+
+
+def test_plots_aggregate_independent_repeats_with_iqr_error_bars(
+    tmp_path,
+) -> None:
+    rows = []
+    for repeat_index, scale in enumerate((0.8, 0.9, 1.0, 1.1, 1.2), start=1):
+        for backend, median in (
+            ("torch-cpu", 10.0 * scale),
+            ("mlx", 5.0 * scale),
+            ("mlx-kernel", 2.0 * scale),
+        ):
+            row = _row(backend, median)
+            row["repeat_index"] = repeat_index
+            rows.append(row)
+
+    latency = latency_entries(rows, "forward")
+    assert latency[0].repeat_count == 5
+    assert latency[0].value == 10.0
+    assert latency[0].lower == 9.0
+    assert latency[0].upper == 11.0
+    speedups = speedup_entries(rows, "forward")
+    assert [entry.value for entry in speedups] == [2.0, 5.0]
+    assert all(entry.repeat_count == 5 for entry in speedups)
+
+    aggregated = aggregate_rows(rows)
+    assert len(aggregated) == 3
+    assert all(row["repeat_count"] == 5 for row in aggregated)
+    assert all(row["successful_repeats"] == 5 for row in aggregated)
+    partial = aggregate_rows(rows[:-1], expected_repeats=5)
+    kernel = next(
+        row for row in partial if row["backend"] == "mlx-kernel"
+    )
+    assert kernel["status"] == "partial"
+    assert kernel["successful_repeats"] == 4
+    assert kernel["repeat_count"] == 5
+
+    result_path = tmp_path / "repeated.json"
+    write_document(
+        result_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "backend": "combined",
+            "preset": "full",
+        },
+        rows,
+    )
+    output = tmp_path / "plots"
+    assert plot_main([str(result_path), "--output-dir", str(output)]) == 0
+    svg = (output / "latency_forward.svg").read_text()
+    assert 'class="error-bar"' in svg
+    assert "n=5" in svg
+    report = (output / "report.html").read_text()
+    assert "Between-run IQR" in report
+    assert "5/5" in report
 
 
 def test_backend_builders_match_the_documented_case_set() -> None:
