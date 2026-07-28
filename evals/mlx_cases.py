@@ -26,6 +26,12 @@ def _imports():
     return mx, nn, o3, scatter_sum
 
 
+def _metal_available() -> bool:
+    from e3nn_mlx.compat import mlx_metal_available
+
+    return mlx_metal_available()
+
+
 def backend_metadata() -> dict[str, Any]:
     mx, _, _, _ = _imports()
     return {
@@ -125,7 +131,15 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
         compile_train=_compiled(value_grad, vectors),
         dispatch=(
             "metal-spherical-harmonics"
-            if _USE_CUSTOM_KERNELS and config["lmax"] <= 4
+            if (
+                _USE_CUSTOM_KERNELS
+                and _metal_available()
+                and vectors.ndim == 2
+                and vectors.shape[0] > 0
+                and vectors.dtype == mx.float32
+                and degrees
+                and max(degrees) <= 4
+            )
             else (
                 "general-mlx (kernel fallback)"
                 if _USE_CUSTOM_KERNELS
@@ -301,7 +315,19 @@ def build_scatter_sum(config: dict[str, Any]) -> Task:
         train=lambda: value_grad(values),
         compile_train=_compiled(value_grad, values),
         dispatch=(
-            "metal-scatter-sum" if _USE_CUSTOM_KERNELS else "general-mlx"
+            "metal-scatter-sum"
+            if (
+                _USE_CUSTOM_KERNELS
+                and _metal_available()
+                and values.ndim >= 2
+                and values.shape[0] > 0
+                and values.dtype == mx.float32
+            )
+            else (
+                "general-mlx (kernel fallback)"
+                if _USE_CUSTOM_KERNELS
+                else "general-mlx"
+            )
         ),
     )
 
@@ -332,9 +358,7 @@ def _model_dispatch(*, supports_kernels: bool) -> str:
         return "general-mlx"
     if not supports_kernels:
         return "general-mlx (model has no kernel toggle)"
-    from e3nn_mlx.compat import mlx_metal_available
-
-    if not mlx_metal_available():
+    if not _metal_available():
         return "general-mlx (kernel fallback)"
     return "mixed-model-kernels"
 

@@ -1307,6 +1307,7 @@ class TensorSquare(TensorProduct):
         internal_weights: bool | None = None,
         shared_weights: bool = True,
         compile_left_right: bool = True,
+        use_custom_kernel: bool = True,
     ) -> None:
         irreps_in = Irreps(irreps_in).simplify()
         parsed_filter = None if filter_ir_out is None else [Irrep.parse(ir) for ir in filter_ir_out]
@@ -1324,6 +1325,7 @@ class TensorSquare(TensorProduct):
                 internal_weights=False,
                 shared_weights=True,
                 compile_left_right=compile_left_right,
+                use_custom_kernel=use_custom_kernel,
             )
             self._execution_irreps_out = self.irreps_out
             grouped_out, index_groups = _group_output_irreps(self._execution_irreps_out)
@@ -1351,6 +1353,7 @@ class TensorSquare(TensorProduct):
                 internal_weights=internal_weights,
                 shared_weights=shared_weights,
                 compile_left_right=compile_left_right,
+                use_custom_kernel=use_custom_kernel,
             )
             self._execution_irreps_out = self.irreps_out
         self.irreps_in = irreps_in

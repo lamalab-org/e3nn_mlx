@@ -200,6 +200,12 @@ def test_mlx_benchmark_reports_actual_tensor_product_dispatch() -> None:
     dense = mlx_cases.build_fully_connected_tensor_product(
         {"items": 64, "mul": 8, "lmax": 2}
     )
+    harmonics = mlx_cases.build_spherical_harmonics(
+        {"items": 16, "lmax": 2}
+    )
+    scatter = mlx_cases.build_scatter_sum(
+        {"items": 16, "nodes": 4, "width": 3}
+    )
     mlx_cases.configure(use_custom_kernels=False)
     general = mlx_cases.build_fully_connected_tensor_product(
         {"items": 16, "mul": 8, "lmax": 2}
@@ -211,6 +217,16 @@ def test_mlx_benchmark_reports_actual_tensor_product_dispatch() -> None:
         else "general-mlx (kernel fallback)"
     )
     assert small.dispatch == expected
+    assert harmonics.dispatch == (
+        "metal-spherical-harmonics"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
+    )
+    assert scatter.dispatch == (
+        "metal-scatter-sum"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
+    )
     assert dense.dispatch == "general-mlx (kernel fallback)"
     assert general.dispatch == "general-mlx"
 
@@ -227,8 +243,16 @@ def test_mlx_benchmark_reports_non_metal_kernel_fallback(monkeypatch) -> None:
     task = mlx_cases.build_fully_connected_tensor_product(
         {"items": 16, "mul": 8, "lmax": 2}
     )
+    harmonics = mlx_cases.build_spherical_harmonics(
+        {"items": 16, "lmax": 2}
+    )
+    scatter = mlx_cases.build_scatter_sum(
+        {"items": 16, "nodes": 4, "width": 3}
+    )
     model_dispatch = mlx_cases._model_dispatch(supports_kernels=True)
     mlx_cases.configure(use_custom_kernels=False)
 
     assert task.dispatch == "general-mlx (kernel fallback)"
+    assert harmonics.dispatch == "general-mlx (kernel fallback)"
+    assert scatter.dispatch == "general-mlx (kernel fallback)"
     assert model_dispatch == "general-mlx (kernel fallback)"

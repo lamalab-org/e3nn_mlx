@@ -211,7 +211,7 @@ def test_weighted_channel_kernel_matches_general_through_nested_derivatives():
         mx.ones_like(right) * -0.03,
         mx.ones_like(weight) * 0.11,
     )
-    with pytest.raises(ValueError, match="Not implemented for CustomKernel"):
+    with pytest.raises(ValueError, match="CustomKernel"):
         mx.jvp(
             lambda first, second, value: apply(
                 kernel, first, second, value

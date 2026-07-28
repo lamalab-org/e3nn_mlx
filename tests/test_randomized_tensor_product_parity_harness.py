@@ -74,9 +74,9 @@ def test_comparison_reports_every_execution_variant_and_retains_failures():
         ],
     }
     variants = []
-    for index, (name, _, _) in enumerate(MLX_VARIANTS):
+    for name, _, use_custom_kernel in MLX_VARIANTS:
         output = reference.copy()
-        if index == 2:
+        if use_custom_kernel:
             output[0, 0] += 0.1
         variants.append(
             {
@@ -84,8 +84,10 @@ def test_comparison_reports_every_execution_variant_and_retains_failures():
                 "status": "ok",
                 "shape": [1, 2],
                 "output": output.tolist(),
-                "custom_eligible": index == 2,
-                "kernel_kind": "scalar_paths" if index == 2 else None,
+                "custom_eligible": use_custom_kernel,
+                "kernel_kind": (
+                    "scalar_paths" if use_custom_kernel else None
+                ),
             }
         )
     mlx_result = {

@@ -49,6 +49,15 @@ def test_tensor_square_symbolic_full_mode() -> None:
     assert {inst.mode for inst in tp.instructions} == {"uvu<v", "uuu"}
 
 
+def test_tensor_square_propagates_custom_kernel_setting() -> None:
+    general = TensorSquare("2x0e", use_custom_kernel=False)
+    requested = TensorSquare("2x0e", use_custom_kernel=True)
+
+    assert general.use_custom_kernel is False
+    assert general._metal_operation is None
+    assert requested.use_custom_kernel is True
+
+
 def test_tensor_square_symbolic_fully_connected_mode() -> None:
     tp = TensorSquare("2x0e", "1x0e", internal_weights=False)
     assert str(tp.irreps_out) == "0e"

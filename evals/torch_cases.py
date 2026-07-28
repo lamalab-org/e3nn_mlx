@@ -81,6 +81,24 @@ def _module_train(module, forward: Callable[[], Any]):
     return train
 
 
+def _forward_with_fixed_radius_graph(
+    model_module,
+    module,
+    data,
+    edge_index,
+):
+    original_radius_graph = model_module.radius_graph
+
+    def fixed_radius_graph(*_args, **_kwargs):
+        return edge_index
+
+    model_module.radius_graph = fixed_radius_graph
+    try:
+        return module(data)
+    finally:
+        model_module.radius_graph = original_radius_graph
+
+
 def build_spherical_harmonics(config: dict[str, Any]) -> Task:
     torch, o3 = _imports()
     vectors = torch.randn(config["items"], 3, requires_grad=True)
@@ -141,7 +159,9 @@ def build_fully_connected_tensor_product(config: dict[str, Any]) -> Task:
     module = o3.FullyConnectedTensorProduct(irreps, irreps, irreps)
     left = torch.randn(config["items"], irreps.dim)
     right = torch.randn(config["items"], irreps.dim)
-    forward = lambda: module(left, right)
+    def forward():
+        return module(left, right)
+
     return _task(
         name="fully_connected_tensor_product",
         config=config,
@@ -212,7 +232,9 @@ def build_linear(config: dict[str, Any]) -> Task:
     irreps = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
     module = o3.Linear(irreps, irreps)
     values = torch.randn(config["items"], irreps.dim)
-    forward = lambda: module(values)
+    def forward():
+        return module(values)
+
     return _task(
         name="linear",
         config=config,
@@ -267,7 +289,7 @@ def _model_graph(config, *, input_dim, node_attr_dim=0, edge_attr_dim=0):
 
 
 def build_gate_points_2102(config: dict[str, Any]) -> Task:
-    torch, o3 = _imports()
+    _, o3 = _imports()
     import e3nn.nn.models.gate_points_2102 as model_module
 
     irreps_in = o3.Irreps("4x0e")
@@ -297,14 +319,20 @@ def build_gate_points_2102(config: dict[str, Any]) -> Task:
         input_dim=irreps_in.dim,
         node_attr_dim=irreps_node_attr.dim,
     )
-    model_module.radius_graph = lambda _pos, _radius, _batch: edge_index
     data = {
         "pos": positions,
         "x": node_input,
         "z": node_attr,
         "batch": batch,
     }
-    forward = lambda: module(data)
+    def forward():
+        return _forward_with_fixed_radius_graph(
+            model_module,
+            module,
+            data,
+            edge_index,
+        )
+
     return _task(
         name="gate_points_2102",
         config=config,
@@ -315,7 +343,7 @@ def build_gate_points_2102(config: dict[str, Any]) -> Task:
 
 
 def build_v2106_simple_network(config: dict[str, Any]) -> Task:
-    torch, o3 = _imports()
+    _, o3 = _imports()
     import e3nn.nn.models.v2106.gate_points_networks as model_module
 
     irreps_in = o3.Irreps("4x0e")
@@ -334,9 +362,16 @@ def build_v2106_simple_network(config: dict[str, Any]) -> Task:
         config,
         input_dim=irreps_in.dim,
     )
-    model_module.radius_graph = lambda _pos, _radius, _batch: edge_index
     data = {"pos": positions, "x": node_input, "batch": batch}
-    forward = lambda: module(data)
+
+    def forward():
+        return _forward_with_fixed_radius_graph(
+            model_module,
+            module,
+            data,
+            edge_index,
+        )
+
     return _task(
         name="v2106_simple_network",
         config=config,
@@ -347,7 +382,7 @@ def build_v2106_simple_network(config: dict[str, Any]) -> Task:
 
 
 def build_v2106_attributed_network(config: dict[str, Any]) -> Task:
-    torch, o3 = _imports()
+    _, o3 = _imports()
     from e3nn.nn.models.v2106.gate_points_networks import (
         NetworkForAGraphWithAttributes,
     )
@@ -382,7 +417,9 @@ def build_v2106_attributed_network(config: dict[str, Any]) -> Task:
         "edge_index": edge_index,
         "batch": batch,
     }
-    forward = lambda: module(data)
+    def forward():
+        return module(data)
+
     return _task(
         name="v2106_attributed_network",
         config=config,

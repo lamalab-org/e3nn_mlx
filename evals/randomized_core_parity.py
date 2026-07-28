@@ -722,11 +722,6 @@ def _torch_worker(cases: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _mlx_variants(case: dict[str, Any]) -> tuple[tuple[str, bool, bool], ...]:
-    if (
-        case["family"] == "tensor_product_wrappers"
-        and case["kind"] == "tensor_square"
-    ):
-        return (("default", True, True),)
     if case["family"] in {"spherical_harmonics", "scatter", "tensor_product_wrappers"}:
         return (
             ("generic-eager", False, False),
@@ -891,6 +886,7 @@ def _mlx_module_output(
             module = o3.TensorSquare(
                 case["irreps_in1"],
                 compile_left_right=compiled,
+                use_custom_kernel=custom,
             )
             output = module(o3.IrrepsArray(module.irreps_in, left_values)).array
         metadata["custom_eligible"] = bool(

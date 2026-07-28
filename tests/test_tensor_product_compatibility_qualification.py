@@ -286,14 +286,13 @@ def test_shared_tensor_product_weights_are_not_materialized_per_item(
         use_custom_kernel=False,
     )
     left = _array(product.irreps_in1, mx.ones((8, product.irreps_in1.dim)))
-    right = _array(product.irreps_in2, mx.ones((8, product.irreps_in2.dim)))
+    right = _array(product.irreps_in2, mx.ones((1, product.irreps_in2.dim)))
     shared_weight = product.weight
-    materialized_shapes = []
+    broadcasts = []
     original_broadcast_to = mx.broadcast_to
 
     def record_broadcast(array, shape, *args, **kwargs):
-        if array is shared_weight:
-            materialized_shapes.append(tuple(shape))
+        broadcasts.append((tuple(array.shape), tuple(shape)))
         return original_broadcast_to(array, shape, *args, **kwargs)
 
     monkeypatch.setattr(mx, "broadcast_to", record_broadcast)
@@ -301,7 +300,17 @@ def test_shared_tensor_product_weights_are_not_materialized_per_item(
     mx.eval(output.array)
 
     assert output.shape == (8, product.irreps_out.dim)
-    assert materialized_shapes == []
+    assert broadcasts
+    weight_broadcasts = [
+        target_shape
+        for source_shape, target_shape in broadcasts
+        if source_shape == tuple(shared_weight.shape)
+        or (
+            source_shape
+            and source_shape[-1] == product.weight_numel
+        )
+    ]
+    assert weight_broadcasts == []
 
 
 @pytest.mark.mlx

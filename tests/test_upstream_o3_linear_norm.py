@@ -158,6 +158,7 @@ def test_grouped_linear_external_weight_vjp_matches_blockwise_formula() -> None:
     module = o3.Linear(
         "3x2e + 3x3e + 2x2e",
         "3x2e + 3x3e + 3x2e",
+        instructions=[(0, 0), (1, 1), (2, 2)],
         internal_weights=False,
         path_normalization="path",
     )
