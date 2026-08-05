@@ -833,14 +833,37 @@ class TensorProduct(mlx_module_base()):
         if right.irreps != self.irreps_in2:
             raise ValueError("input irreps do not match TensorProduct.irreps_in2")
         resolved_weight = self._get_weight(weight)
-        eye = mx.eye(self.irreps_in1.dim, dtype=right.array.dtype)
-        basis_outputs = []
-        for index in range(self.irreps_in1.dim):
-            basis = mx.broadcast_to(eye[index], (*right.leading_shape, self.irreps_in1.dim))
-            left = IrrepsArray(self.irreps_in1, basis)
-            out = self(left, right, weight=resolved_weight)
-            basis_outputs.append(out.array)
-        return mx.stack(basis_outputs, axis=-2)
+        weight_leading_shape = (
+            tuple(int(size) for size in resolved_weight.shape[:-1])
+            if resolved_weight is not None and not self.shared_weights
+            else ()
+        )
+        try:
+            leading_shape = mx.broadcast_shapes(
+                right.leading_shape, weight_leading_shape
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "TensorProduct.right leading shapes are not broadcastable: "
+                f"{right.leading_shape}, {weight_leading_shape}"
+            ) from exc
+
+        # Evaluate every left basis vector as one additional batch dimension.
+        # This produces (..., irreps_in1.dim, irreps_out.dim) directly and lets
+        # MLX compile the complete right-operator construction as one graph,
+        # instead of launching the tensor product once per input component.
+        left_array = mx.broadcast_to(
+            mx.eye(self.irreps_in1.dim, dtype=right.array.dtype),
+            (*leading_shape, self.irreps_in1.dim, self.irreps_in1.dim),
+        )
+        right_array = mx.broadcast_to(
+            right.array, (*leading_shape, self.irreps_in2.dim)
+        )[..., None, :]
+        if resolved_weight is not None and not self.shared_weights:
+            resolved_weight = mx.broadcast_to(
+                resolved_weight, (*leading_shape, self.weight_numel)
+            )[..., None, :]
+        return self._compiled(left_array, right_array, resolved_weight)
 
     def weight_view_for_instruction(self, instruction_index: int, weight: Any | None = None) -> Any:
         resolved_weight = self._get_weight(weight)
