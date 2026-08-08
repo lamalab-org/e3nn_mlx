@@ -190,6 +190,47 @@ def test_upstream_tensor_product_unshared_weight_broadcast_and_validation() -> N
 
 
 @pytest.mark.mlx
+def test_tensor_product_right_broadcasts_unshared_weights_and_preserves_vjp() -> None:
+    mx = mlx_backend._require()
+    product = o3.TensorProduct(
+        "2x1o",
+        "3x1e",
+        "4x1o",
+        [(0, 0, 0, "uvw", True)],
+        internal_weights=False,
+        shared_weights=False,
+        use_custom_kernel=False,
+    )
+    left = mx.random.normal(shape=(2, 3, product.irreps_in1.dim))
+    right = mx.random.normal(shape=(2, 1, product.irreps_in2.dim))
+    weight = mx.random.normal(shape=(1, 3, product.weight_numel))
+    cotangent = mx.random.normal(shape=(2, 3, product.irreps_out.dim))
+
+    def through_right(right_array, weights):
+        operator = product.right(
+            _array(product.irreps_in2, right_array), weights
+        )
+        return mx.einsum("...i,...io->...o", left, operator)
+
+    def through_forward(right_array, weights):
+        return product(
+            _array(product.irreps_in1, left),
+            _array(product.irreps_in2, right_array),
+            weights,
+        ).array
+
+    actual = through_right(right, weight)
+    expected = through_forward(right, weight)
+    assert actual.shape == (2, 3, product.irreps_out.dim)
+    assert _max_abs(actual - expected) < 3e-5
+
+    _, actual_vjp = mx.vjp(through_right, (right, weight), (cotangent,))
+    _, expected_vjp = mx.vjp(through_forward, (right, weight), (cotangent,))
+    assert _max_abs(actual_vjp[0] - expected_vjp[0]) < 3e-5
+    assert _max_abs(actual_vjp[1] - expected_vjp[1]) < 3e-5
+
+
+@pytest.mark.mlx
 @pytest.mark.parametrize("shared", [True, False])
 def test_upstream_tensor_product_accepts_per_instruction_weight_lists(shared: bool) -> None:
     mx = mlx_backend._require()

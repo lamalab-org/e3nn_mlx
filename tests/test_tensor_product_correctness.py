@@ -234,7 +234,7 @@ def _reference_tensor_product(tp: TensorProduct, left: IrrepsArray, right: Irrep
 @pytest.mark.parametrize(
     ("mode", "irreps_in1", "irreps_in2", "irreps_out", "instructions", "weight", "shared_weights"),
     [
-        ("uvw", "1o", "1o", "0e+1e+2e", [(0, 0, 0, "uvw", False), (0, 0, 1, "uvw", False), (0, 0, 2, "uvw", False)], None, True),
+        ("uvuv-unweighted", "1o", "1o", "0e+1e+2e", [(0, 0, 0, "uvuv", False), (0, 0, 1, "uvuv", False), (0, 0, 2, "uvuv", False)], None, True),
         ("uvu", "2x0e", "3x0e", "2x0e", [(0, 0, 0, "uvu", True)], [1.0, 0.5, -1.0, 2.0, 0.0, -0.5], True),
         (
             "uvu-grouped",

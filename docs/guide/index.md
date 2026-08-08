@@ -9,6 +9,7 @@ jump directly to migration or performance.
 
 installation
 irreps
+linear
 tensor_products
 equivariance
 migration

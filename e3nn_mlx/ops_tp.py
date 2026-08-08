@@ -28,6 +28,7 @@ from .ops_basic import compile_or_identity, get_extension
 # modifying the selection control flow.
 _METAL_SCALAR_PATH_MAX_TERMS = 2_000_000
 _METAL_SCALAR_PATH_MAX_BATCH = 512
+_METAL_SCALAR_PATH_MAX_WORK = 2_000_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -385,6 +386,11 @@ def _numerical_tensor_product(
     if weights is not None:
         if weights.ndim < 1 or weights.shape[-1] != plan.weight_numel:
             raise ValueError(f"expected weight shape (..., {plan.weight_numel}), got {tuple(weights.shape)}")
+        if weights.dtype != left.dtype:
+            raise TypeError(
+                f"tensor product weights must match input dtype {left.dtype}, "
+                f"got {weights.dtype}"
+            )
         weight_leading_shape = tuple(int(size) for size in weights.shape[:-1])
     else:
         weight_leading_shape = ()
@@ -399,6 +405,22 @@ def _numerical_tensor_product(
         left = IrrepsArray(left.irreps, mx.broadcast_to(left.array, (*leading_shape, left.irreps.dim)))
     if right.leading_shape != leading_shape:
         right = IrrepsArray(right.irreps, mx.broadcast_to(right.array, (*leading_shape, right.irreps.dim)))
+    # A one-dimensional weight vector is shared across every leading input
+    # dimension.  Keep it compact and let the contraction broadcast it
+    # implicitly: materializing ``(*leading_shape, weight_numel)`` makes
+    # reverse mode construct one weight-gradient row per item before reducing
+    # it back to the shared parameter, which is especially expensive for dense
+    # ``uvw`` products.  Non-empty leading dimensions identify batched
+    # (unshared) weights and still need explicit broadcasting when compatible.
+    if (
+        weights is not None
+        and weight_leading_shape
+        and weight_leading_shape != leading_shape
+    ):
+        weights = mx.broadcast_to(
+            weights,
+            (*leading_shape, plan.weight_numel),
+        )
 
     left_chunks = left.chunk_arrays()
     right_chunks = right.chunk_arrays()
@@ -424,7 +446,6 @@ def _numerical_tensor_product(
             left.array.dtype,
         )
     output_blocks = [mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype) for part in plan.irreps_out]
-    grouped_outputs: list[list[Any]] = [[] for _ in plan.irreps_out]
     for instruction_index, inst in enumerate(plan.instructions):
         left_mul = plan.irreps_in1[inst.input1_index].mul
         right_mul = plan.irreps_in2[inst.input2_index].mul
@@ -438,16 +459,7 @@ def _numerical_tensor_product(
             if weight_slice is not None:
                 raw_weight = weights[..., weight_slice]
         contribution = _apply_connection_mode(inst, pair, raw_weight, pair.dtype)
-        if weights is None:
-            grouped_outputs[output_index].append(contribution)
-        else:
-            output_blocks[output_index] = output_blocks[output_index] + contribution
-
-    if weights is None:
-        output_blocks = [
-            mx.concatenate(blocks, axis=-2) if blocks else mx.zeros((*leading_shape, part.mul, part.ir.dim), dtype=left.array.dtype)
-            for part, blocks in zip(plan.irreps_out, grouped_outputs, strict=True)
-        ]
+        output_blocks[output_index] = output_blocks[output_index] + contribution
     if not output_blocks:
         return IrrepsArray(plan.irreps_out, mx.zeros((*leading_shape, 0), dtype=left.array.dtype))
     array = mx.concatenate(
@@ -504,13 +516,16 @@ class TensorProduct(mlx_module_base()):
     ) -> None:
         super().__init__()
         mx, _ = require_mlx()
-        self.irreps_in1 = Irreps(irreps_in1).remove_zero_multiplicities()
-        self.irreps_in2 = Irreps(irreps_in2).remove_zero_multiplicities()
-        self.irreps_out = Irreps(irreps_out).remove_zero_multiplicities()
+        original_irreps_in1 = Irreps(irreps_in1)
+        original_irreps_in2 = Irreps(irreps_in2)
+        original_irreps_out = Irreps(irreps_out)
+        self.irreps_in1 = original_irreps_in1.remove_zero_multiplicities()
+        self.irreps_in2 = original_irreps_in2.remove_zero_multiplicities()
+        self.irreps_out = original_irreps_out.remove_zero_multiplicities()
         self.instructions = make_tensor_product_instructions(
-            self.irreps_in1,
-            self.irreps_in2,
-            self.irreps_out,
+            original_irreps_in1,
+            original_irreps_in2,
+            original_irreps_out,
             instructions,
             in1_var=in1_var,
             in2_var=in2_var,
@@ -690,9 +705,9 @@ class TensorProduct(mlx_module_base()):
         )
         self._metal_kernel_kind = "scalar_paths"
 
-    def _try_metal(
+    def _metal_dispatch_kind(
         self, left_array: Any, right_array: Any, weight: Any | None
-    ) -> Any | None:
+    ) -> str | None:
         mx, _ = require_mlx()
         if (
             self._metal_operation is None
@@ -709,7 +724,11 @@ class TensorProduct(mlx_module_base()):
         # at large edge counts and are not subject to this crossover guard.
         if (
             getattr(self, "_metal_kernel_kind", None) == "scalar_paths"
-            and left_array.shape[0] > _METAL_SCALAR_PATH_MAX_BATCH
+            and (
+                left_array.shape[0] > _METAL_SCALAR_PATH_MAX_BATCH
+                or self._metal_path_count * left_array.shape[0]
+                > _METAL_SCALAR_PATH_MAX_WORK
+            )
         ):
             return None
         if self.weight_numel > 0:
@@ -723,9 +742,14 @@ class TensorProduct(mlx_module_base()):
                     return None
             else:
                 return None
-            metal_weight = weight
-        else:
-            metal_weight = self._metal_dummy_weight
+        return getattr(self, "_metal_kernel_kind", None)
+
+    def _try_metal(
+        self, left_array: Any, right_array: Any, weight: Any | None
+    ) -> Any | None:
+        if self._metal_dispatch_kind(left_array, right_array, weight) is None:
+            return None
+        metal_weight = weight if self.weight_numel > 0 else self._metal_dummy_weight
         return self._metal_operation(left_array, right_array, metal_weight)
 
     def _general_call_arrays(
@@ -759,6 +783,10 @@ class TensorProduct(mlx_module_base()):
             if tuple(weight.shape) != (self.weight_numel,):
                 raise ValueError(f"Expected shared weight shape {(self.weight_numel,)}, got {tuple(weight.shape)}")
         else:
+            if weight.ndim < 2:
+                raise ValueError(
+                    "shared_weights=False requires weights with a batch dimension"
+                )
             if weight.shape[-1] != self.weight_numel:
                 raise ValueError(f"Expected unshared weight shape (..., {self.weight_numel}), got {tuple(weight.shape)}")
         return weight
@@ -805,14 +833,37 @@ class TensorProduct(mlx_module_base()):
         if right.irreps != self.irreps_in2:
             raise ValueError("input irreps do not match TensorProduct.irreps_in2")
         resolved_weight = self._get_weight(weight)
-        eye = mx.eye(self.irreps_in1.dim, dtype=right.array.dtype)
-        basis_outputs = []
-        for index in range(self.irreps_in1.dim):
-            basis = mx.broadcast_to(eye[index], (*right.leading_shape, self.irreps_in1.dim))
-            left = IrrepsArray(self.irreps_in1, basis)
-            out = self(left, right, weight=resolved_weight)
-            basis_outputs.append(out.array)
-        return mx.stack(basis_outputs, axis=-2)
+        weight_leading_shape = (
+            tuple(int(size) for size in resolved_weight.shape[:-1])
+            if resolved_weight is not None and not self.shared_weights
+            else ()
+        )
+        try:
+            leading_shape = mx.broadcast_shapes(
+                right.leading_shape, weight_leading_shape
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "TensorProduct.right leading shapes are not broadcastable: "
+                f"{right.leading_shape}, {weight_leading_shape}"
+            ) from exc
+
+        # Evaluate every left basis vector as one additional batch dimension.
+        # This produces (..., irreps_in1.dim, irreps_out.dim) directly and lets
+        # MLX compile the complete right-operator construction as one graph,
+        # instead of launching the tensor product once per input component.
+        left_array = mx.broadcast_to(
+            mx.eye(self.irreps_in1.dim, dtype=right.array.dtype),
+            (*leading_shape, self.irreps_in1.dim, self.irreps_in1.dim),
+        )
+        right_array = mx.broadcast_to(
+            right.array, (*leading_shape, self.irreps_in2.dim)
+        )[..., None, :]
+        if resolved_weight is not None and not self.shared_weights:
+            resolved_weight = mx.broadcast_to(
+                resolved_weight, (*leading_shape, self.weight_numel)
+            )[..., None, :]
+        return self._compiled(left_array, right_array, resolved_weight)
 
     def weight_view_for_instruction(self, instruction_index: int, weight: Any | None = None) -> Any:
         resolved_weight = self._get_weight(weight)
@@ -1279,6 +1330,7 @@ class TensorSquare(TensorProduct):
         internal_weights: bool | None = None,
         shared_weights: bool = True,
         compile_left_right: bool = True,
+        use_custom_kernel: bool = True,
     ) -> None:
         irreps_in = Irreps(irreps_in).simplify()
         parsed_filter = None if filter_ir_out is None else [Irrep.parse(ir) for ir in filter_ir_out]
@@ -1296,6 +1348,7 @@ class TensorSquare(TensorProduct):
                 internal_weights=False,
                 shared_weights=True,
                 compile_left_right=compile_left_right,
+                use_custom_kernel=use_custom_kernel,
             )
             self._execution_irreps_out = self.irreps_out
             grouped_out, index_groups = _group_output_irreps(self._execution_irreps_out)
@@ -1323,6 +1376,7 @@ class TensorSquare(TensorProduct):
                 internal_weights=internal_weights,
                 shared_weights=shared_weights,
                 compile_left_right=compile_left_right,
+                use_custom_kernel=use_custom_kernel,
             )
             self._execution_irreps_out = self.irreps_out
         self.irreps_in = irreps_in

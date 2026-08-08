@@ -304,9 +304,9 @@ def test_tensor_product_right_matches_forward() -> None:
         "1o",
         "0e + 1e + 2e",
         [
-            (0, 0, 0, "uvw", False),
-            (0, 0, 1, "uvw", False),
-            (0, 0, 2, "uvw", False),
+            (0, 0, 0, "uvuv", False),
+            (0, 0, 1, "uvuv", False),
+            (0, 0, 2, "uvuv", False),
         ],
         internal_weights=False,
     )

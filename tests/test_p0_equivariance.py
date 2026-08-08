@@ -68,7 +68,7 @@ def test_tensor_product_broadcasts_all_leading_dimensions() -> None:
 
 def test_tensor_product_rejects_wrong_metadata_even_when_dimensions_match() -> None:
     product = TensorProduct(
-        "1o", "1o", "0e", [(0, 0, 0, "uvw", False)], internal_weights=False, compile_left_right=False
+        "1o", "1o", "0e", [(0, 0, 0, "uvuv", False)], internal_weights=False, compile_left_right=False
     )
     wrong = IrrepsArray("3x0e", mlx_backend.asarray([[1.0, 2.0, 3.0]]))
     vector = IrrepsArray("1o", mlx_backend.asarray([[1.0, 2.0, 3.0]]))

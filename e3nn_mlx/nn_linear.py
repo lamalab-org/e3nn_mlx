@@ -71,8 +71,8 @@ class Linear(mlx_module_base()):
         if instructions is None:
             path_indices = [
                 (input_index, output_index)
-                for output_index, out_part in enumerate(self.irreps_out)
                 for input_index, in_part in enumerate(self.irreps_in)
+                for output_index, out_part in enumerate(self.irreps_out)
                 if in_part.ir == out_part.ir
             ]
         else:
@@ -243,18 +243,11 @@ class Linear(mlx_module_base()):
             )
             input_indices = tuple(dict.fromkeys(inst.input_index for inst in group))
             output_indices = tuple(dict.fromkeys(inst.output_index for inst in group))
-            input_offsets = {}
             output_offsets = {}
-            cursor = 0
-            for index in input_indices:
-                input_offsets[index] = cursor
-                cursor += self.irreps_in[index].mul
-            total_input = cursor
             cursor = 0
             for index in output_indices:
                 output_offsets[index] = cursor
                 cursor += self.irreps_out[index].mul
-            total_output = cursor
             combined_input = mx.concatenate(
                 [
                     input_chunks[index].reshape(
@@ -275,25 +268,45 @@ class Linear(mlx_module_base()):
                 ).astype(array.dtype)
                 matrix = instruction.path_weight * matrix
             else:
-                matrix = mx.zeros(
-                    (*weight.shape[:-1], total_input, total_output),
-                    dtype=array.dtype,
-                )
-                for instruction in group:
-                    input_start = input_offsets[instruction.input_index]
-                    output_start = output_offsets[instruction.output_index]
-                    block = weight[..., instruction.weight_slice].reshape(
-                        *weight.shape[:-1],
-                        instruction.in_mul,
-                        instruction.out_mul,
-                    ).astype(array.dtype)
-                    matrix = matrix.at[
-                        ...,
-                        input_start : input_start + instruction.in_mul,
-                        output_start : output_start + instruction.out_mul,
-                    ].add(instruction.path_weight * block)
-            transformed = mx.swapaxes(
-                mx.swapaxes(combined_input, -1, -2) @ matrix, -1, -2
+                rows = []
+                for input_index in input_indices:
+                    columns = []
+                    for output_index in output_indices:
+                        matching = tuple(
+                            instruction
+                            for instruction in group
+                            if instruction.input_index == input_index
+                            and instruction.output_index == output_index
+                        )
+                        if matching:
+                            blocks = [
+                                instruction.path_weight
+                                * weight[..., instruction.weight_slice]
+                                .reshape(
+                                    *weight.shape[:-1],
+                                    instruction.in_mul,
+                                    instruction.out_mul,
+                                )
+                                .astype(array.dtype)
+                                for instruction in matching
+                            ]
+                            block = sum(blocks[1:], blocks[0])
+                        else:
+                            block = mx.zeros(
+                                (
+                                    *weight.shape[:-1],
+                                    self.irreps_in[input_index].mul,
+                                    self.irreps_out[output_index].mul,
+                                ),
+                                dtype=array.dtype,
+                            )
+                        columns.append(block)
+                    rows.append(mx.concatenate(columns, axis=-1))
+                matrix = mx.concatenate(rows, axis=-2)
+            transformed = mx.einsum(
+                "...id,...io->...od",
+                combined_input,
+                matrix,
             )
             for output_index in output_indices:
                 start = output_offsets[output_index]

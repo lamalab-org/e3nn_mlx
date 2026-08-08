@@ -103,6 +103,15 @@ output = gate(features)
 for raw arrays. Their explicit `forward` methods and callable behavior are
 equivalent.
 
+`o3.Linear` uses the same default instruction and flat-weight order as upstream
+e3nn: compatible paths are enumerated by input block, then output block.
+External weights can therefore be transferred without reordering when irreps
+and explicit instructions match. Use `weight_views(...,
+yield_instruction=True)` to inspect each
+`(input_multiplicity, output_multiplicity)` matrix. See the
+[Linear guide](guide/linear.md) for shared and per-sample layouts,
+normalization, biases, and differentiation guarantees.
+
 ## Model imports
 
 The upstream module layout is mirrored:

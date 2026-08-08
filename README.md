@@ -86,15 +86,14 @@ compilation boundary, upstream semantics, and verification coverage.
 
 ## Performance evaluation
 
-The isolated cross-framework harness in [`evals/`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/README.md) compares
-MLX eager/compiled execution with upstream PyTorch/e3nn on Apple Silicon. It
-covers spherical harmonics, tensor products, Linear, v2106 convolution,
-message passing, and an end-to-end attributed network in forward and training
-modes. Small smoke presets, larger scaling experiments, synchronized timing,
-JSON/CSV results, and dependency-free SVG/HTML plot generation are included.
-Generated Metal kernels and the reproducible kernel/general-MLX/Torch-CPU
-comparison are documented in
-[`evals/KERNEL_EVALUATION.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/KERNEL_EVALUATION.md).
+The compact cross-framework harness in
+[`evals/`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/README.md)
+always compares three isolated workers: upstream e3nn on Torch CPU using all
+available CPU threads, compiled general MLX, and compiled MLX with generated
+kernels. It covers spherical harmonics, tensor products, Linear, and scatter
+aggregation in forward and training modes. Smoke and full presets produce
+synchronized JSON, CSV, SVG, and HTML reports. Separate seeded randomized
+harnesses qualify numerical outputs and VJPs against upstream e3nn.
 
 ### JVP and generated-kernel boundary
 
@@ -142,6 +141,6 @@ scatter calls keep the faster indexed-add implementation.
 
 This changes execution strategy, not mathematical conventions or accuracy.
 Reverse-mode gradients and reverse-over-reverse second derivatives remain
-supported by the generated kernels. See
-[`evals/KERNEL_EVALUATION.md`](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/KERNEL_EVALUATION.md) for the performance
-and fallback details.
+supported by the generated kernels. See the
+[`evals/` guide](https://github.com/lamalab-org/e3nn_mlx/blob/main/evals/README.md)
+for the three-way performance comparison and randomized parity commands.

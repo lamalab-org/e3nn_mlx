@@ -72,9 +72,20 @@ With `shared_weights=True`, weights have shape `(weight_numel,)`. With
 `(..., weight_numel)`, which is useful when a radial network predicts a tensor
 product for every graph edge.
 
+Shared weights remain one-dimensional during execution. MLX broadcasts them
+inside each contraction rather than materializing one copy per input item.
+This keeps dense `uvw` parameter-gradient reductions compact and applies to
+every weighted TensorProduct connection mode. Batched and singleton-leading
+external weights still broadcast to the input leading dimensions as required.
+
 ## Compilation and generated kernels
 
 Compatible float32, rank-two inputs dispatch to specialized Metal kernels on
 Apple silicon. Other shapes, dtypes, large dense contractions, and unsupported
 instruction mixtures automatically use general MLX operations. Both paths
 implement the same contraction and normalization conventions.
+
+Scalar-path kernel selection considers both the static contraction size and
+the batch size. Small sparse products retain the fused kernel, while dense
+FullyConnectedTensorProduct workloads use MLX matrix contractions after their
+measured kernel crossover.

@@ -1,72 +1,51 @@
-"""PyTorch/e3nn implementations of the shared benchmark workloads."""
+"""Torch CPU/e3nn implementations for the compact three-way benchmark."""
 
 from __future__ import annotations
 
 import importlib.metadata
+import os
 from typing import Any, Callable
 
 from .common import Task
 from .workloads import CASE_DESCRIPTIONS, ring_edges, spherical_irreps
 
 
-_DEVICE = "cpu"
-_ENABLE_COMPILE = False
+_THREADS = max(1, os.cpu_count() or 1)
 
 
-def configure(*, device: str, enable_compile: bool) -> None:
-    global _DEVICE, _ENABLE_COMPILE
+def configure() -> None:
     import torch
 
-    if device == "auto":
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-    if device == "mps" and not torch.backends.mps.is_available():
-        raise RuntimeError("PyTorch MPS is not available in this interpreter")
-    _DEVICE = device
-    _ENABLE_COMPILE = enable_compile
+    torch.set_num_threads(_THREADS)
+    try:
+        torch.set_num_interop_threads(_THREADS)
+    except RuntimeError:
+        pass
     torch.manual_seed(0)
 
 
 def _imports():
     import torch
     from e3nn import o3
-    from e3nn.nn.models.v2106.gate_points_message_passing import MessagePassing
-    from e3nn.nn.models.v2106.gate_points_networks import (
-        NetworkForAGraphWithAttributes,
-    )
-    from e3nn.nn.models.v2106.points_convolution import Convolution
 
-    return torch, o3, Convolution, MessagePassing, NetworkForAGraphWithAttributes
+    return torch, o3
 
 
 def backend_metadata() -> dict[str, Any]:
-    torch, _, _, _, _ = _imports()
+    torch, _ = _imports()
     return {
         "framework": "torch",
         "framework_version": importlib.metadata.version("torch"),
         "e3nn_version": importlib.metadata.version("e3nn"),
-        "device": _DEVICE,
-        "mps_built": torch.backends.mps.is_built(),
-        "mps_available": torch.backends.mps.is_available(),
-        "compiled": _ENABLE_COMPILE,
+        "device": "cpu",
+        "threads": torch.get_num_threads(),
+        "interop_threads": torch.get_num_interop_threads(),
+        "compiled": False,
     }
 
 
 def _sync(_result) -> None:
-    torch, _, _, _, _ = _imports()
-    if _DEVICE == "mps":
-        torch.mps.synchronize()
-
-
-def _inference(function: Callable[[], Any]) -> Callable[[], Any]:
-    torch, _, _, _, _ = _imports()
-    return torch.inference_mode()(function)
-
-
-def _compiler(function: Callable[[], Any]) -> Callable[[], Callable[[], Any]] | None:
-    if not _ENABLE_COMPILE:
-        return None
-    torch, _, _, _, _ = _imports()
-    return lambda: torch.compile(function)
+    return None
 
 
 def _task(
@@ -75,19 +54,19 @@ def _task(
     config: dict[str, Any],
     item_count: int,
     forward: Callable[[], Any],
-    train: Callable[[], Any] | None,
+    train: Callable[[], Any],
 ) -> Task:
+    torch, _ = _imports()
     return Task(
         name=name,
         family=name,
         description=CASE_DESCRIPTIONS[name],
         config=config,
         item_count=item_count,
-        forward=_inference(forward),
+        forward=torch.inference_mode()(forward),
         synchronize=_sync,
-        compile_forward=_compiler(_inference(forward)),
+        dispatch="torch-eager",
         train=train,
-        compile_train=_compiler(train) if train is not None else None,
     )
 
 
@@ -95,45 +74,37 @@ def _module_train(module, forward: Callable[[], Any]):
     def train():
         for parameter in module.parameters():
             parameter.grad = None
-        output = forward()
-        loss = output.square().mean()
+        loss = forward().square().mean()
         loss.backward()
         return loss
 
     return train
 
 
-def _activate_alpha(module) -> None:
-    torch, _, _, _, _ = _imports()
-    layers = module.layers if hasattr(module, "layers") else module.mp.layers
-    with torch.no_grad():
-        for layer in layers:
-            convolution = layer.first if hasattr(layer, "first") else layer
-            convolution.alpha.weight.normal_(mean=0.0, std=0.05)
+def _forward_with_fixed_radius_graph(
+    model_module,
+    module,
+    data,
+    edge_index,
+):
+    original_radius_graph = model_module.radius_graph
 
+    def fixed_radius_graph(*_args, **_kwargs):
+        return edge_index
 
-def _edge_data(config):
-    torch, o3, _, _, _ = _imports()
-    source, destination = ring_edges(config["nodes"], config["neighbors"])
-    edge_src = torch.tensor(source, dtype=torch.long, device=_DEVICE)
-    edge_dst = torch.tensor(destination, dtype=torch.long, device=_DEVICE)
-    edge_vectors = torch.randn(len(source), 3, device=_DEVICE)
-    irreps_edge = o3.Irreps.spherical_harmonics(config["lmax"])
-    edge_attr = o3.spherical_harmonics(
-        irreps_edge,
-        edge_vectors,
-        normalize=True,
-        normalization="component",
-    )
-    return edge_src, edge_dst, edge_vectors, irreps_edge, edge_attr
+    model_module.radius_graph = fixed_radius_graph
+    try:
+        return module(data)
+    finally:
+        model_module.radius_graph = original_radius_graph
 
 
 def build_spherical_harmonics(config: dict[str, Any]) -> Task:
-    torch, o3, _, _, _ = _imports()
-    vectors = torch.randn(config["items"], 3, device=_DEVICE, requires_grad=True)
+    torch, o3 = _imports()
+    vectors = torch.randn(config["items"], 3, requires_grad=True)
     degrees = list(range(config["lmax"] + 1))
 
-    def raw():
+    def forward():
         return o3.spherical_harmonics(
             degrees,
             vectors,
@@ -143,7 +114,7 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
 
     def train():
         vectors.grad = None
-        loss = raw().square().mean()
+        loss = forward().square().mean()
         loss.backward()
         return loss
 
@@ -151,25 +122,25 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
         name="spherical_harmonics",
         config=config,
         item_count=config["items"],
-        forward=raw,
+        forward=forward,
         train=train,
     )
 
 
 def build_full_tensor_product(config: dict[str, Any]) -> Task:
-    torch, o3, _, _, _ = _imports()
+    torch, o3 = _imports()
     irreps = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    module = o3.FullTensorProduct(irreps, irreps).to(_DEVICE)
-    left = torch.randn(config["items"], irreps.dim, device=_DEVICE, requires_grad=True)
-    right = torch.randn(config["items"], irreps.dim, device=_DEVICE, requires_grad=True)
+    module = o3.FullTensorProduct(irreps, irreps)
+    left = torch.randn(config["items"], irreps.dim, requires_grad=True)
+    right = torch.randn(config["items"], irreps.dim, requires_grad=True)
 
-    def raw():
+    def forward():
         return module(left, right)
 
     def train():
         left.grad = None
         right.grad = None
-        loss = raw().square().mean()
+        loss = forward().square().mean()
         loss.backward()
         return loss
 
@@ -177,258 +148,284 @@ def build_full_tensor_product(config: dict[str, Any]) -> Task:
         name="full_tensor_product",
         config=config,
         item_count=config["items"],
-        forward=raw,
+        forward=forward,
         train=train,
     )
 
 
 def build_fully_connected_tensor_product(config: dict[str, Any]) -> Task:
-    torch, o3, _, _, _ = _imports()
+    torch, o3 = _imports()
     irreps = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    module = o3.FullyConnectedTensorProduct(irreps, irreps, irreps).to(_DEVICE)
-    left = torch.randn(config["items"], irreps.dim, device=_DEVICE)
-    right = torch.randn(config["items"], irreps.dim, device=_DEVICE)
-    raw = lambda: module(left, right)
+    module = o3.FullyConnectedTensorProduct(irreps, irreps, irreps)
+    left = torch.randn(config["items"], irreps.dim)
+    right = torch.randn(config["items"], irreps.dim)
+    def forward():
+        return module(left, right)
+
     return _task(
         name="fully_connected_tensor_product",
         config=config,
         item_count=config["items"],
-        forward=raw,
-        train=_module_train(module, raw),
+        forward=forward,
+        train=_module_train(module, forward),
     )
 
 
-def build_linear(config: dict[str, Any]) -> Task:
-    torch, o3, _, _, _ = _imports()
-    irreps = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    module = o3.Linear(irreps, irreps).to(_DEVICE)
-    values = torch.randn(config["items"], irreps.dim, device=_DEVICE)
-    raw = lambda: module(values)
-    return _task(
-        name="linear",
-        config=config,
-        item_count=config["items"],
-        forward=raw,
-        train=_module_train(module, raw),
+def _weighted_uvu(o3, config):
+    irreps_left = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
+    irreps_right = o3.Irreps.spherical_harmonics(config["lmax"])
+    outputs = []
+    instructions = []
+    for i_left, left in enumerate(irreps_left):
+        for i_right, right in enumerate(irreps_right):
+            for out in irreps_left:
+                if out.ir not in (left.ir * right.ir):
+                    continue
+                outputs.append(str(out))
+                instructions.append(
+                    (i_left, i_right, len(outputs) - 1, "uvu", True)
+                )
+    return o3.TensorProduct(
+        irreps_left,
+        irreps_right,
+        " + ".join(outputs),
+        instructions,
+        internal_weights=False,
+        shared_weights=False,
     )
-
-
-def _convolution_fixture(config):
-    torch, o3, Convolution, _, _ = _imports()
-    irreps_node = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
-    radial = config.get("radial", 10)
-    radial_hidden = config.get("radial_hidden", 64)
-    module = Convolution(
-        irreps_node,
-        "0e",
-        irreps_edge,
-        irreps_node,
-        [radial, radial_hidden],
-        float(config["neighbors"]),
-    ).to(_DEVICE)
-    return torch, o3, module, edge_src, edge_dst, edge_attr
 
 
 def build_weighted_tensor_product_uvu(config: dict[str, Any]) -> Task:
-    torch, _, convolution, edge_src, _, edge_attr = _convolution_fixture(config)
-    module = convolution.tp
+    torch, o3 = _imports()
+    module = _weighted_uvu(o3, config)
     left = torch.randn(
-        edge_src.shape[0], module.irreps_in1.dim, device=_DEVICE, requires_grad=True
+        config["items"], module.irreps_in1.dim, requires_grad=True
     )
-    right = edge_attr.detach().requires_grad_(True)
+    right = torch.randn(
+        config["items"], module.irreps_in2.dim, requires_grad=True
+    )
     weights = torch.randn(
-        edge_src.shape[0], module.weight_numel, device=_DEVICE, requires_grad=True
+        config["items"], module.weight_numel, requires_grad=True
     )
 
-    def raw():
+    def forward():
         return module(left, right, weights)
 
     def train():
         for value in (left, right, weights):
             value.grad = None
-        loss = raw().square().mean()
+        loss = forward().square().mean()
         loss.backward()
         return loss
 
     return _task(
         name="weighted_tensor_product_uvu",
         config=config,
-        item_count=edge_src.shape[0],
-        forward=raw,
+        item_count=config["items"],
+        forward=forward,
         train=train,
     )
 
 
-def build_scatter_sum(config: dict[str, Any]) -> Task:
-    torch, _, convolution, edge_src, edge_dst, _ = _convolution_fixture(config)
-    source = torch.randn(
-        edge_src.shape[0],
-        convolution.tp.irreps_out.dim,
-        device=_DEVICE,
-        requires_grad=True,
+def build_linear(config: dict[str, Any]) -> Task:
+    torch, o3 = _imports()
+    irreps = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
+    module = o3.Linear(irreps, irreps)
+    values = torch.randn(config["items"], irreps.dim)
+    def forward():
+        return module(values)
+
+    return _task(
+        name="linear",
+        config=config,
+        item_count=config["items"],
+        forward=forward,
+        train=_module_train(module, forward),
     )
 
-    def raw():
-        output = torch.zeros(
-            config["nodes"], source.shape[1], device=_DEVICE, dtype=source.dtype
-        )
-        return output.index_add(0, edge_dst, source)
+
+def build_scatter_sum(config: dict[str, Any]) -> Task:
+    torch, _ = _imports()
+    values = torch.randn(
+        config["items"],
+        config["width"],
+        requires_grad=True,
+    )
+    index = torch.arange(config["items"]) % config["nodes"]
+
+    def forward():
+        output = torch.zeros(config["nodes"], config["width"])
+        return output.index_add(0, index, values)
 
     def train():
-        source.grad = None
-        loss = raw().square().mean()
+        values.grad = None
+        loss = forward().square().mean()
         loss.backward()
         return loss
 
     return _task(
         name="scatter_sum",
         config=config,
-        item_count=edge_src.shape[0],
-        forward=raw,
+        item_count=config["items"],
+        forward=forward,
         train=train,
     )
 
 
-def build_gate(config: dict[str, Any]) -> Task:
-    torch, o3, _, _, _ = _imports()
-    from e3nn.nn import Gate
+def _model_graph(config, *, input_dim, node_attr_dim=0, edge_attr_dim=0):
+    torch, _ = _imports()
+    source, destination = ring_edges(config["nodes"], config["neighbors"])
+    positions = 0.25 * torch.randn(config["nodes"], 3)
+    node_input = torch.randn(config["nodes"], input_dim)
+    node_attr = (
+        torch.randn(config["nodes"], node_attr_dim) if node_attr_dim else None
+    )
+    edge_attr = (
+        torch.randn(len(source), edge_attr_dim) if edge_attr_dim else None
+    )
+    batch = torch.zeros(config["nodes"], dtype=torch.long)
+    edge_index = torch.tensor([source, destination], dtype=torch.long)
+    return positions, node_input, node_attr, edge_attr, batch, edge_index
 
-    scalars = o3.Irreps(f"{config['mul']}x0e")
-    gated = o3.Irreps(
-        " + ".join(
-            f"{config['mul']}x{degree}{'e' if degree % 2 == 0 else 'o'}"
-            for degree in range(1, config["lmax"] + 1)
+
+def build_gate_points_2102(config: dict[str, Any]) -> Task:
+    _, o3 = _imports()
+    import e3nn.nn.models.gate_points_2102 as model_module
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_hidden = " + ".join(
+        f"{config['mul']}x{degree}{parity}"
+        for degree in range(config["lmax"] + 1)
+        for parity in ("e", "o")
+    )
+    module = model_module.Network(
+        irreps_in,
+        irreps_hidden,
+        "1x0e",
+        irreps_node_attr,
+        o3.Irreps.spherical_harmonics(config["lmax"]),
+        layers=config["layers"],
+        max_radius=2.0,
+        number_of_basis=8,
+        radial_layers=2,
+        radial_neurons=max(16, 4 * config["mul"]),
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        reduce_output=True,
+    )
+    positions, node_input, node_attr, _, batch, edge_index = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+    )
+    data = {
+        "pos": positions,
+        "x": node_input,
+        "z": node_attr,
+        "batch": batch,
+    }
+    def forward():
+        return _forward_with_fixed_radius_graph(
+            model_module,
+            module,
+            data,
+            edge_index,
         )
-    )
-    gates = o3.Irreps(f"{config['mul'] * config['lmax']}x0e")
-    module = Gate(
-        scalars,
-        [torch.nn.functional.silu],
-        gates,
-        [torch.sigmoid],
-        gated,
-    ).to(_DEVICE)
-    values = torch.randn(
-        config["items"], module.irreps_in.dim, device=_DEVICE, requires_grad=True
-    )
-    raw = lambda: module(values)
+
     return _task(
-        name="gate",
+        name="gate_points_2102",
         config=config,
-        item_count=config["items"],
-        forward=raw,
-        train=_module_train(module, raw),
+        item_count=config["nodes"],
+        forward=forward,
+        train=_module_train(module, forward),
     )
 
 
-def build_radial_mlp(config: dict[str, Any]) -> Task:
-    torch, _, convolution, edge_src, _, _ = _convolution_fixture(config)
-    module = convolution.fc
-    values = torch.randn(edge_src.shape[0], config["radial"], device=_DEVICE)
-    raw = lambda: module(values)
-    return _task(
-        name="radial_mlp",
-        config=config,
-        item_count=edge_src.shape[0],
-        forward=raw,
-        train=_module_train(module, raw),
-    )
+def build_v2106_simple_network(config: dict[str, Any]) -> Task:
+    _, o3 = _imports()
+    import e3nn.nn.models.v2106.gate_points_networks as model_module
 
-
-def build_v2106_convolution(config: dict[str, Any]) -> Task:
-    torch, o3, Convolution, _, _ = _imports()
-    irreps_node = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
-    module = Convolution(
-        irreps_node,
-        "0e",
-        irreps_edge,
-        irreps_node,
-        [config["radial"], config["radial_hidden"]],
-        float(config["neighbors"]),
-    ).to(_DEVICE)
-    with torch.no_grad():
-        module.alpha.weight.normal_(mean=0.0, std=0.05)
-    node_input = torch.randn(config["nodes"], irreps_node.dim, device=_DEVICE)
-    node_attr = torch.ones(config["nodes"], 1, device=_DEVICE)
-    edge_scalars = torch.randn(edge_src.shape[0], config["radial"], device=_DEVICE)
-    raw = lambda: module(
-        node_input, node_attr, edge_src, edge_dst, edge_attr, edge_scalars
-    )
-    return _task(
-        name="v2106_convolution",
-        config=config,
-        item_count=edge_src.shape[0],
-        forward=raw,
-        train=_module_train(module, raw),
-    )
-
-
-def build_v2106_message_passing(config: dict[str, Any]) -> Task:
-    torch, o3, _, MessagePassing, _ = _imports()
-    irreps_node = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
-    module = MessagePassing(
-        [irreps_node] * (config["layers"] + 2),
-        "0e",
-        irreps_edge,
-        [config["radial"], config["radial_hidden"]],
-        float(config["neighbors"]),
-    ).to(_DEVICE)
-    _activate_alpha(module)
-    node_input = torch.randn(config["nodes"], irreps_node.dim, device=_DEVICE)
-    node_attr = torch.ones(config["nodes"], 1, device=_DEVICE)
-    edge_scalars = torch.randn(edge_src.shape[0], config["radial"], device=_DEVICE)
-    raw = lambda: module(
-        node_input, node_attr, edge_src, edge_dst, edge_attr, edge_scalars
-    )
-    return _task(
-        name="v2106_message_passing",
-        config=config,
-        item_count=edge_src.shape[0] * len(module.layers),
-        forward=raw,
-        train=_module_train(module, raw),
-    )
-
-
-def build_v2106_network(config: dict[str, Any]) -> Task:
-    torch, o3, _, _, Network = _imports()
-    irreps_node = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
-    edge_src, edge_dst, _, _, _ = _edge_data(config)
-    module = Network(
-        irreps_node,
-        "0e",
-        "0e",
-        irreps_node,
-        max_radius=4.0,
+    irreps_in = o3.Irreps("4x0e")
+    module = model_module.SimpleNetwork(
+        irreps_in,
+        "1x0e",
+        max_radius=2.0,
         num_neighbors=float(config["neighbors"]),
         num_nodes=float(config["nodes"]),
         mul=config["mul"],
         layers=config["layers"],
         lmax=config["lmax"],
         pool_nodes=True,
-    ).to(_DEVICE)
-    _activate_alpha(module)
-    positions = torch.randn(config["nodes"], 3, device=_DEVICE)
-    node_input = torch.randn(config["nodes"], irreps_node.dim, device=_DEVICE)
-    node_attr = torch.ones(config["nodes"], 1, device=_DEVICE)
-    edge_attr = torch.ones(edge_src.shape[0], 1, device=_DEVICE)
-    edge_index = torch.stack([edge_src, edge_dst])
+    )
+    positions, node_input, _, _, batch, edge_index = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+    )
+    data = {"pos": positions, "x": node_input, "batch": batch}
+
+    def forward():
+        return _forward_with_fixed_radius_graph(
+            model_module,
+            module,
+            data,
+            edge_index,
+        )
+
+    return _task(
+        name="v2106_simple_network",
+        config=config,
+        item_count=config["nodes"],
+        forward=forward,
+        train=_module_train(module, forward),
+    )
+
+
+def build_v2106_attributed_network(config: dict[str, Any]) -> Task:
+    _, o3 = _imports()
+    from e3nn.nn.models.v2106.gate_points_networks import (
+        NetworkForAGraphWithAttributes,
+    )
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_edge_attr = o3.Irreps("2x0e")
+    module = NetworkForAGraphWithAttributes(
+        irreps_in,
+        irreps_node_attr,
+        irreps_edge_attr,
+        "1x0e",
+        max_radius=2.0,
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        mul=config["mul"],
+        layers=config["layers"],
+        lmax=config["lmax"],
+        pool_nodes=True,
+    )
+    positions, node_input, node_attr, edge_attr, batch, edge_index = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+        edge_attr_dim=irreps_edge_attr.dim,
+    )
     data = {
         "pos": positions,
         "node_input": node_input,
         "node_attr": node_attr,
         "edge_attr": edge_attr,
         "edge_index": edge_index,
+        "batch": batch,
     }
-    raw = lambda: module(data)
+    def forward():
+        return module(data)
+
     return _task(
-        name="v2106_network",
+        name="v2106_attributed_network",
         config=config,
-        item_count=edge_src.shape[0] * len(module.mp.layers),
-        forward=raw,
-        train=_module_train(module, raw),
+        item_count=config["nodes"],
+        forward=forward,
+        train=_module_train(module, forward),
     )
 
 
@@ -436,16 +433,10 @@ BUILDERS = {
     "spherical_harmonics": build_spherical_harmonics,
     "full_tensor_product": build_full_tensor_product,
     "fully_connected_tensor_product": build_fully_connected_tensor_product,
-    "linear": build_linear,
     "weighted_tensor_product_uvu": build_weighted_tensor_product_uvu,
+    "linear": build_linear,
     "scatter_sum": build_scatter_sum,
-    "gate": build_gate,
-    "radial_mlp": build_radial_mlp,
-    "v2106_convolution": build_v2106_convolution,
-    "v2106_message_passing": build_v2106_message_passing,
-    "v2106_network": build_v2106_network,
+    "gate_points_2102": build_gate_points_2102,
+    "v2106_simple_network": build_v2106_simple_network,
+    "v2106_attributed_network": build_v2106_attributed_network,
 }
-
-
-def build_tasks(workloads: dict[str, dict[str, Any]]) -> list[Task]:
-    return [BUILDERS[name](config) for name, config in workloads.items()]

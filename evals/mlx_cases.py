@@ -1,4 +1,4 @@
-"""MLX implementations of the shared benchmark workloads."""
+"""MLX implementations for the compact three-way benchmark."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ from .common import Task
 from .workloads import CASE_DESCRIPTIONS, ring_edges, spherical_irreps
 
 
-_USE_CUSTOM_KERNELS = True
+_USE_CUSTOM_KERNELS = False
 
 
-def configure(*, use_custom_kernels: bool = True) -> None:
+def configure(*, use_custom_kernels: bool) -> None:
     global _USE_CUSTOM_KERNELS
     _USE_CUSTOM_KERNELS = bool(use_custom_kernels)
 
@@ -21,24 +21,30 @@ def _imports():
     import mlx.core as mx
     import mlx.nn as nn
 
-    import e3nn_mlx as e3nn
-    from e3nn_mlx.models.v2106 import Compose, Convolution, MessagePassing
+    from e3nn_mlx import o3, scatter_sum
 
-    return mx, nn, e3nn, Compose, Convolution, MessagePassing
+    return mx, nn, o3, scatter_sum
+
+
+def _metal_available() -> bool:
+    from e3nn_mlx.compat import mlx_metal_available
+
+    return mlx_metal_available()
 
 
 def backend_metadata() -> dict[str, Any]:
-    mx, _, _, _, _, _ = _imports()
+    mx, _, _, _ = _imports()
     return {
         "framework": "mlx",
         "framework_version": importlib.metadata.version("mlx"),
         "device": str(mx.default_device()),
         "compiled": True,
+        "custom_kernels": _USE_CUSTOM_KERNELS,
     }
 
 
 def _sync(result) -> None:
-    mx, _, _, _, _, _ = _imports()
+    mx, _, _, _ = _imports()
     mx.eval(result)
     mx.synchronize()
 
@@ -50,10 +56,11 @@ def _task(
     item_count: int,
     forward: Callable[[], Any],
     compile_forward: Callable[[], Callable[[], Any]],
-    train: Callable[[], Any] | None = None,
-    compile_train: Callable[[], Callable[[], Any]] | None = None,
+    train: Callable[[], Any],
+    compile_train: Callable[[], Callable[[], Any]],
+    dispatch: str = "general-mlx",
 ) -> Task:
-    mx, _, _, _, _, _ = _imports()
+    mx, _, _, _ = _imports()
     return Task(
         name=name,
         family=name,
@@ -62,6 +69,7 @@ def _task(
         item_count=item_count,
         forward=forward,
         synchronize=_sync,
+        dispatch=dispatch,
         compile_forward=compile_forward,
         train=train,
         compile_train=compile_train,
@@ -70,54 +78,41 @@ def _task(
     )
 
 
-def _module_train_functions(module, loss, arguments):
-    mx, nn, _, _, _, _ = _imports()
-    value_grad = nn.value_and_grad(module, loss)
+def _tensor_product_dispatch(module, left, right, weight=None) -> str:
+    if not _USE_CUSTOM_KERNELS:
+        return "general-mlx"
+    kind = module._metal_dispatch_kind(left, right, weight)
+    if kind is None:
+        return "general-mlx (kernel fallback)"
+    return f"metal-{kind.replace('_', '-')}"
 
-    def eager():
-        return value_grad(*arguments)
 
-    def compiler():
-        compiled = mx.compile(value_grad)
+def _compiled(function, *arguments):
+    mx, _, _, _ = _imports()
+
+    def prepare():
+        compiled = mx.compile(function)
         return lambda: compiled(*arguments)
 
-    return eager, compiler
+    return prepare
 
 
-def _activate_alpha(module) -> None:
-    mx, _, _, Compose, _, _ = _imports()
-    layers = module.layers if hasattr(module, "layers") else module.mp.layers
-    for layer in layers:
-        convolution = layer.first if isinstance(layer, Compose) else layer
-        convolution.alpha.update(
-            {"weight": 0.05 * mx.random.normal(shape=convolution.alpha.weight.shape)}
-        )
-
-
-def _edge_data(config):
-    mx, _, e3nn, _, _, _ = _imports()
-    source, destination = ring_edges(config["nodes"], config["neighbors"])
-    edge_src = mx.array(source, dtype=mx.int32)
-    edge_dst = mx.array(destination, dtype=mx.int32)
-    edge_vectors = mx.random.normal(shape=(len(source), 3))
-    irreps_edge = e3nn.Irreps.spherical_harmonics(config["lmax"])
-    edge_attr = e3nn.spherical_harmonics(
-        irreps_edge,
-        edge_vectors,
-        normalize=True,
-        normalization="component",
-        use_custom_kernel=_USE_CUSTOM_KERNELS,
+def _module_grad(module, loss, *arguments):
+    mx, nn, _, _ = _imports()
+    value_grad = nn.value_and_grad(module, loss)
+    return (
+        lambda: value_grad(*arguments),
+        _compiled(value_grad, *arguments),
     )
-    return edge_src, edge_dst, edge_vectors, irreps_edge, edge_attr
 
 
 def build_spherical_harmonics(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, _, _ = _imports()
-    vectors = mx.random.normal(shape=(config["items"], 3))
+    mx, _, o3, _ = _imports()
+    vectors = mx.random.normal((config["items"], 3))
     degrees = list(range(config["lmax"] + 1))
 
-    def raw(value):
-        return e3nn.spherical_harmonics(
+    def forward(value):
+        return o3.spherical_harmonics(
             degrees,
             value,
             normalize=True,
@@ -125,339 +120,322 @@ def build_spherical_harmonics(config: dict[str, Any]) -> Task:
             use_custom_kernel=_USE_CUSTOM_KERNELS,
         )
 
-    def loss(value):
-        return mx.mean(raw(value) ** 2)
-
-    value_grad = mx.value_and_grad(loss)
+    value_grad = mx.value_and_grad(lambda value: mx.mean(forward(value) ** 2))
     return _task(
         name="spherical_harmonics",
         config=config,
         item_count=config["items"],
-        forward=lambda: raw(vectors),
-        compile_forward=lambda: (lambda compiled=mx.compile(raw): compiled(vectors)),
+        forward=lambda: forward(vectors),
+        compile_forward=_compiled(forward, vectors),
         train=lambda: value_grad(vectors),
-        compile_train=lambda: (
-            lambda compiled=mx.compile(value_grad): compiled(vectors)
+        compile_train=_compiled(value_grad, vectors),
+        dispatch=(
+            "metal-spherical-harmonics"
+            if (
+                _USE_CUSTOM_KERNELS
+                and _metal_available()
+                and vectors.ndim == 2
+                and vectors.shape[0] > 0
+                and vectors.dtype == mx.float32
+                and degrees
+                and max(degrees) <= 4
+            )
+            else (
+                "general-mlx (kernel fallback)"
+                if _USE_CUSTOM_KERNELS
+                else "general-mlx"
+            )
         ),
     )
 
 
 def build_full_tensor_product(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, _, _ = _imports()
+    mx, _, o3, _ = _imports()
     irreps = spherical_irreps(config["mul"], config["lmax"])
-    module = e3nn.FullTensorProduct(
-        irreps, irreps, use_custom_kernel=_USE_CUSTOM_KERNELS
+    module = o3.FullTensorProduct(
+        irreps,
+        irreps,
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
-    left = mx.random.normal(shape=(config["items"], module.irreps_in1.dim))
-    right = mx.random.normal(shape=(config["items"], module.irreps_in2.dim))
+    left = mx.random.normal((config["items"], module.irreps_in1.dim))
+    right = mx.random.normal((config["items"], module.irreps_in2.dim))
 
-    def raw(first, second):
-        return module(
-            e3nn.IrrepsArray(module.irreps_in1, first),
-            e3nn.IrrepsArray(module.irreps_in2, second),
-        ).array
+    def forward(first, second):
+        return module(first, second)
 
-    def loss(first, second):
-        return mx.mean(raw(first, second) ** 2)
-
-    value_grad = mx.value_and_grad(loss, argnums=(0, 1))
-
-    def compile_forward():
-        compiled = mx.compile(raw)
-        return lambda: compiled(left, right)
-
-    def compile_train():
-        compiled = mx.compile(value_grad)
-        return lambda: compiled(left, right)
-
+    value_grad = mx.value_and_grad(
+        lambda first, second: mx.mean(forward(first, second) ** 2),
+        argnums=(0, 1),
+    )
     return _task(
         name="full_tensor_product",
         config=config,
         item_count=config["items"],
-        forward=lambda: raw(left, right),
-        compile_forward=compile_forward,
+        forward=lambda: forward(left, right),
+        compile_forward=_compiled(forward, left, right),
         train=lambda: value_grad(left, right),
-        compile_train=compile_train,
+        compile_train=_compiled(value_grad, left, right),
+        dispatch=_tensor_product_dispatch(module, left, right),
     )
 
 
 def build_fully_connected_tensor_product(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, _, _ = _imports()
+    mx, _, o3, _ = _imports()
     irreps = spherical_irreps(config["mul"], config["lmax"])
-    module = e3nn.FullyConnectedTensorProduct(
-        irreps, irreps, irreps, use_custom_kernel=_USE_CUSTOM_KERNELS
+    module = o3.FullyConnectedTensorProduct(
+        irreps,
+        irreps,
+        irreps,
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
-    left = mx.random.normal(shape=(config["items"], module.irreps_in1.dim))
-    right = mx.random.normal(shape=(config["items"], module.irreps_in2.dim))
+    left = mx.random.normal((config["items"], module.irreps_in1.dim))
+    right = mx.random.normal((config["items"], module.irreps_in2.dim))
 
-    def raw(first, second):
-        return module(
-            e3nn.IrrepsArray(module.irreps_in1, first),
-            e3nn.IrrepsArray(module.irreps_in2, second),
-        ).array
+    def forward(first, second):
+        return module(first, second)
 
-    train, compile_train = _module_train_functions(
-        module, lambda first, second: mx.mean(raw(first, second) ** 2), (left, right)
+    train, compile_train = _module_grad(
+        module,
+        lambda first, second: mx.mean(forward(first, second) ** 2),
+        left,
+        right,
     )
-
-    def compile_forward():
-        compiled = mx.compile(raw)
-        return lambda: compiled(left, right)
-
     return _task(
         name="fully_connected_tensor_product",
         config=config,
         item_count=config["items"],
-        forward=lambda: raw(left, right),
-        compile_forward=compile_forward,
+        forward=lambda: forward(left, right),
+        compile_forward=_compiled(forward, left, right),
         train=train,
         compile_train=compile_train,
+        dispatch=_tensor_product_dispatch(module, left, right, module.weight),
     )
 
 
-def build_linear(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, _, _ = _imports()
-    irreps = spherical_irreps(config["mul"], config["lmax"])
-    module = e3nn.Linear(irreps, irreps)
-    values = mx.random.normal(shape=(config["items"], module.irreps_in.dim))
-
-    def raw(array):
-        return module(e3nn.IrrepsArray(module.irreps_in, array)).array
-
-    train, compile_train = _module_train_functions(
-        module, lambda array: mx.mean(raw(array) ** 2), (values,)
-    )
-    return _task(
-        name="linear",
-        config=config,
-        item_count=config["items"],
-        forward=lambda: raw(values),
-        compile_forward=lambda: (lambda compiled=mx.compile(raw): compiled(values)),
-        train=train,
-        compile_train=compile_train,
-    )
-
-
-def _convolution_fixture(config):
-    mx, _, e3nn, _, Convolution, _ = _imports()
-    irreps_node = spherical_irreps(config["mul"], config["lmax"])
-    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
-    radial = config.get("radial", 10)
-    radial_hidden = config.get("radial_hidden", 64)
-    module = Convolution(
-        irreps_node,
-        "0e",
-        irreps_edge,
-        irreps_node,
-        [radial, radial_hidden],
-        float(config["neighbors"]),
+def _weighted_uvu(o3, config):
+    irreps_left = o3.Irreps(spherical_irreps(config["mul"], config["lmax"]))
+    irreps_right = o3.Irreps.spherical_harmonics(config["lmax"])
+    outputs = []
+    instructions = []
+    for i_left, left in enumerate(irreps_left):
+        for i_right, right in enumerate(irreps_right):
+            for out in irreps_left:
+                if out.ir not in (left.ir * right.ir):
+                    continue
+                outputs.append(str(out))
+                instructions.append(
+                    (i_left, i_right, len(outputs) - 1, "uvu", True)
+                )
+    return o3.TensorProduct(
+        irreps_left,
+        irreps_right,
+        " + ".join(outputs),
+        instructions,
+        internal_weights=False,
+        shared_weights=False,
         use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
-    return mx, e3nn, module, edge_src, edge_dst, edge_attr
 
 
 def build_weighted_tensor_product_uvu(config: dict[str, Any]) -> Task:
-    mx, e3nn, convolution, edge_src, _, edge_attr = _convolution_fixture(config)
-    module = convolution.tp
-    left = mx.random.normal(shape=(edge_src.shape[0], module.irreps_in1.dim))
-    right = edge_attr
-    weights = mx.random.normal(shape=(edge_src.shape[0], module.weight_numel))
+    mx, _, o3, _ = _imports()
+    module = _weighted_uvu(o3, config)
+    left = mx.random.normal((config["items"], module.irreps_in1.dim))
+    right = mx.random.normal((config["items"], module.irreps_in2.dim))
+    weights = mx.random.normal((config["items"], module.weight_numel))
 
-    def raw(first, second, weight):
-        return module(
-            e3nn.IrrepsArray(module.irreps_in1, first),
-            e3nn.IrrepsArray(module.irreps_in2, second),
-            weight,
-        ).array
+    def forward(first, second, weight):
+        return module(first, second, weight)
 
     value_grad = mx.value_and_grad(
-        lambda first, second, weight: mx.mean(raw(first, second, weight) ** 2),
+        lambda first, second, weight: mx.mean(
+            forward(first, second, weight) ** 2
+        ),
         argnums=(0, 1, 2),
     )
     arguments = left, right, weights
     return _task(
         name="weighted_tensor_product_uvu",
         config=config,
-        item_count=edge_src.shape[0],
-        forward=lambda: raw(*arguments),
-        compile_forward=lambda: (
-            lambda compiled=mx.compile(raw): compiled(*arguments)
-        ),
+        item_count=config["items"],
+        forward=lambda: forward(*arguments),
+        compile_forward=_compiled(forward, *arguments),
         train=lambda: value_grad(*arguments),
-        compile_train=lambda: (
-            lambda compiled=mx.compile(value_grad): compiled(*arguments)
-        ),
+        compile_train=_compiled(value_grad, *arguments),
+        dispatch=_tensor_product_dispatch(module, *arguments),
+    )
+
+
+def build_linear(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    irreps = spherical_irreps(config["mul"], config["lmax"])
+    module = o3.Linear(irreps, irreps)
+    values = mx.random.normal((config["items"], module.irreps_in.dim))
+
+    def forward(value):
+        return module(value)
+
+    train, compile_train = _module_grad(
+        module,
+        lambda value: mx.mean(forward(value) ** 2),
+        values,
+    )
+    return _task(
+        name="linear",
+        config=config,
+        item_count=config["items"],
+        forward=lambda: forward(values),
+        compile_forward=_compiled(forward, values),
+        train=train,
+        compile_train=compile_train,
+        dispatch="general-mlx",
     )
 
 
 def build_scatter_sum(config: dict[str, Any]) -> Task:
-    mx, e3nn, convolution, edge_src, edge_dst, _ = _convolution_fixture(config)
-    width = convolution.irreps_mid_execution.dim
-    source = mx.random.normal(shape=(edge_src.shape[0], width))
+    mx, _, _, scatter_sum = _imports()
+    values = mx.random.normal((config["items"], config["width"]))
+    index = mx.arange(config["items"], dtype=mx.int32) % config["nodes"]
 
-    def raw(values):
-        return e3nn.scatter_sum(
-            values,
-            edge_dst,
+    def forward(source):
+        return scatter_sum(
+            source,
+            index,
             config["nodes"],
             use_custom_kernel=_USE_CUSTOM_KERNELS,
         )
 
-    value_grad = mx.value_and_grad(lambda values: mx.mean(raw(values) ** 2))
+    value_grad = mx.value_and_grad(lambda source: mx.mean(forward(source) ** 2))
     return _task(
         name="scatter_sum",
         config=config,
-        item_count=edge_src.shape[0],
-        forward=lambda: raw(source),
-        compile_forward=lambda: (lambda compiled=mx.compile(raw): compiled(source)),
-        train=lambda: value_grad(source),
-        compile_train=lambda: (
-            lambda compiled=mx.compile(value_grad): compiled(source)
-        ),
-    )
-
-
-def build_gate(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, _, _ = _imports()
-    from e3nn_mlx.nn_gate import Gate
-
-    scalars = f"{config['mul']}x0e"
-    gated = " + ".join(
-        f"{config['mul']}x{degree}{'e' if degree % 2 == 0 else 'o'}"
-        for degree in range(1, config["lmax"] + 1)
-    )
-    gates = f"{config['mul'] * config['lmax']}x0e"
-    module = Gate(
-        scalars,
-        [lambda value: value * mx.sigmoid(value)],
-        gates,
-        [mx.sigmoid],
-        gated,
-    )
-    values = mx.random.normal(shape=(config["items"], module.irreps_in.dim))
-
-    def raw(array):
-        return module(e3nn.IrrepsArray(module.irreps_in, array)).array
-
-    value_grad = mx.value_and_grad(lambda array: mx.mean(raw(array) ** 2))
-    return _task(
-        name="gate",
-        config=config,
         item_count=config["items"],
-        forward=lambda: raw(values),
-        compile_forward=lambda: (lambda compiled=mx.compile(raw): compiled(values)),
+        forward=lambda: forward(values),
+        compile_forward=_compiled(forward, values),
         train=lambda: value_grad(values),
-        compile_train=lambda: (
-            lambda compiled=mx.compile(value_grad): compiled(values)
+        compile_train=_compiled(value_grad, values),
+        dispatch=(
+            "metal-scatter-sum"
+            if (
+                _USE_CUSTOM_KERNELS
+                and _metal_available()
+                and values.ndim >= 2
+                and values.shape[0] > 0
+                and values.dtype == mx.float32
+            )
+            else (
+                "general-mlx (kernel fallback)"
+                if _USE_CUSTOM_KERNELS
+                else "general-mlx"
+            )
         ),
     )
 
 
-def build_radial_mlp(config: dict[str, Any]) -> Task:
-    mx, _, convolution, edge_src, _, _ = _convolution_fixture(config)
-    module = convolution.fc
-    values = mx.random.normal(shape=(edge_src.shape[0], config["radial"]))
-    train, compile_train = _module_train_functions(
-        module, lambda array: mx.mean(module(array) ** 2), (values,)
+def _model_graph(config, *, input_dim, node_attr_dim=0, edge_attr_dim=0):
+    mx, _, _, _ = _imports()
+    source, destination = ring_edges(config["nodes"], config["neighbors"])
+    positions = 0.25 * mx.random.normal((config["nodes"], 3))
+    node_input = mx.random.normal((config["nodes"], input_dim))
+    node_attr = (
+        mx.random.normal((config["nodes"], node_attr_dim))
+        if node_attr_dim
+        else None
     )
-    return _task(
-        name="radial_mlp",
-        config=config,
-        item_count=edge_src.shape[0],
-        forward=lambda: module(values),
-        compile_forward=lambda: (
-            lambda compiled=mx.compile(module): compiled(values)
+    edge_attr = (
+        mx.random.normal((len(source), edge_attr_dim))
+        if edge_attr_dim
+        else None
+    )
+    batch = mx.zeros((config["nodes"],), dtype=mx.int32)
+    edge_src = mx.array(source, dtype=mx.int32)
+    edge_dst = mx.array(destination, dtype=mx.int32)
+    return positions, node_input, node_attr, edge_attr, batch, edge_src, edge_dst
+
+
+def _model_dispatch(*, supports_kernels: bool) -> str:
+    if not _USE_CUSTOM_KERNELS:
+        return "general-mlx"
+    if not supports_kernels:
+        return "general-mlx (model has no kernel toggle)"
+    if not _metal_available():
+        return "general-mlx (kernel fallback)"
+    return "mixed-model-kernels"
+
+
+def build_gate_points_2102(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    from e3nn_mlx.models.gate_points_2102 import Network
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_hidden = " + ".join(
+        f"{config['mul']}x{degree}{parity}"
+        for degree in range(config["lmax"] + 1)
+        for parity in ("e", "o")
+    )
+    module = Network(
+        irreps_in,
+        irreps_hidden,
+        "1x0e",
+        irreps_node_attr,
+        o3.Irreps.spherical_harmonics(config["lmax"]),
+        layers=config["layers"],
+        max_radius=2.0,
+        number_of_basis=8,
+        radial_layers=2,
+        radial_neurons=max(16, 4 * config["mul"]),
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        reduce_output=True,
+    )
+    positions, node_input, node_attr, _, batch, edge_src, edge_dst = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+    )
+
+    def forward(pos, features, attributes):
+        return module.forward_with_edges(
+            pos,
+            features,
+            attributes,
+            batch,
+            edge_src,
+            edge_dst,
+            num_graphs=1,
+        ).array
+
+    train, compile_train = _module_grad(
+        module,
+        lambda pos, features, attributes: mx.mean(
+            forward(pos, features, attributes) ** 2
         ),
-        train=train,
-        compile_train=compile_train,
+        positions,
+        node_input,
+        node_attr,
     )
-
-
-def build_v2106_convolution(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, Convolution, _ = _imports()
-    irreps_node = spherical_irreps(config["mul"], config["lmax"])
-    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
-    module = Convolution(
-        irreps_node,
-        "0e",
-        irreps_edge,
-        irreps_node,
-        [config["radial"], config["radial_hidden"]],
-        float(config["neighbors"]),
-        use_custom_kernel=_USE_CUSTOM_KERNELS,
-    )
-    module.alpha.update({"weight": 0.05 * mx.random.normal(shape=module.alpha.weight.shape)})
-    node_input = mx.random.normal(shape=(config["nodes"], module.irreps_node_input.dim))
-    node_attr = mx.ones((config["nodes"], 1))
-    edge_scalars = mx.random.normal(shape=(edge_src.shape[0], config["radial"]))
-    arguments = node_input, node_attr, edge_src, edge_dst, edge_attr, edge_scalars
-    raw = module.forward_arrays
-    train, compile_train = _module_train_functions(
-        module, lambda *args: mx.mean(raw(*args) ** 2), arguments
-    )
-
-    def compile_forward():
-        compiled = mx.compile(raw)
-        return lambda: compiled(*arguments)
-
     return _task(
-        name="v2106_convolution",
+        name="gate_points_2102",
         config=config,
-        item_count=edge_src.shape[0],
-        forward=lambda: raw(*arguments),
-        compile_forward=compile_forward,
+        item_count=config["nodes"],
+        forward=lambda: forward(positions, node_input, node_attr),
+        compile_forward=_compiled(forward, positions, node_input, node_attr),
         train=train,
         compile_train=compile_train,
+        dispatch=_model_dispatch(supports_kernels=False),
     )
 
 
-def build_v2106_message_passing(config: dict[str, Any]) -> Task:
-    mx, _, _, _, _, MessagePassing = _imports()
-    irreps_node = spherical_irreps(config["mul"], config["lmax"])
-    edge_src, edge_dst, _, irreps_edge, edge_attr = _edge_data(config)
-    module = MessagePassing(
-        [irreps_node] * (config["layers"] + 2),
-        "0e",
-        irreps_edge,
-        [config["radial"], config["radial_hidden"]],
-        float(config["neighbors"]),
-        use_custom_kernel=_USE_CUSTOM_KERNELS,
-    )
-    _activate_alpha(module)
-    node_input = mx.random.normal(shape=(config["nodes"], module.irreps_node_input.dim))
-    node_attr = mx.ones((config["nodes"], 1))
-    edge_scalars = mx.random.normal(shape=(edge_src.shape[0], config["radial"]))
-    arguments = node_input, node_attr, edge_src, edge_dst, edge_attr, edge_scalars
-    raw = module.forward_arrays
-    train, compile_train = _module_train_functions(
-        module, lambda *args: mx.mean(raw(*args) ** 2), arguments
-    )
+def build_v2106_simple_network(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    from e3nn_mlx.models.v2106 import SimpleNetwork
 
-    def compile_forward():
-        compiled = mx.compile(raw)
-        return lambda: compiled(*arguments)
-
-    return _task(
-        name="v2106_message_passing",
-        config=config,
-        item_count=edge_src.shape[0] * len(module.layers),
-        forward=lambda: raw(*arguments),
-        compile_forward=compile_forward,
-        train=train,
-        compile_train=compile_train,
-    )
-
-
-def build_v2106_network(config: dict[str, Any]) -> Task:
-    mx, _, e3nn, _, _, _ = _imports()
-    irreps_node = spherical_irreps(config["mul"], config["lmax"])
-    edge_src, edge_dst, _, _, _ = _edge_data(config)
-    module = e3nn.NetworkForAGraphWithAttributes(
-        irreps_node,
-        "0e",
-        "0e",
-        irreps_node,
-        max_radius=4.0,
+    irreps_in = o3.Irreps("4x0e")
+    module = SimpleNetwork(
+        irreps_in,
+        "1x0e",
+        max_radius=2.0,
         num_neighbors=float(config["neighbors"]),
         num_nodes=float(config["nodes"]),
         mul=config["mul"],
@@ -466,42 +444,107 @@ def build_v2106_network(config: dict[str, Any]) -> Task:
         pool_nodes=True,
         use_custom_kernel=_USE_CUSTOM_KERNELS,
     )
-    _activate_alpha(module)
-    positions = mx.random.normal(shape=(config["nodes"], 3))
-    node_input = mx.random.normal(shape=(config["nodes"], module.irreps_node_input.dim))
-    node_attr = mx.ones((config["nodes"], 1))
-    edge_attr = mx.ones((edge_src.shape[0], 1))
-    batch = mx.zeros((config["nodes"],), dtype=mx.int32)
-    arguments = positions, node_input, node_attr, edge_attr, batch, edge_src, edge_dst
+    positions, node_input, _, _, batch, edge_src, edge_dst = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+    )
 
-    def raw(pos, features, attributes, edge_attributes, graph_batch, source, destination):
+    def forward(pos, features):
+        return module.forward_with_edges(
+            pos,
+            features,
+            batch,
+            edge_src,
+            edge_dst,
+            num_graphs=1,
+        ).array
+
+    train, compile_train = _module_grad(
+        module,
+        lambda pos, features: mx.mean(forward(pos, features) ** 2),
+        positions,
+        node_input,
+    )
+    return _task(
+        name="v2106_simple_network",
+        config=config,
+        item_count=config["nodes"],
+        forward=lambda: forward(positions, node_input),
+        compile_forward=_compiled(forward, positions, node_input),
+        train=train,
+        compile_train=compile_train,
+        dispatch=_model_dispatch(supports_kernels=True),
+    )
+
+
+def build_v2106_attributed_network(config: dict[str, Any]) -> Task:
+    mx, _, o3, _ = _imports()
+    from e3nn_mlx.models.v2106 import NetworkForAGraphWithAttributes
+
+    irreps_in = o3.Irreps("4x0e")
+    irreps_node_attr = o3.Irreps("4x0e")
+    irreps_edge_attr = o3.Irreps("2x0e")
+    module = NetworkForAGraphWithAttributes(
+        irreps_in,
+        irreps_node_attr,
+        irreps_edge_attr,
+        "1x0e",
+        max_radius=2.0,
+        num_neighbors=float(config["neighbors"]),
+        num_nodes=float(config["nodes"]),
+        mul=config["mul"],
+        layers=config["layers"],
+        lmax=config["lmax"],
+        pool_nodes=True,
+        use_custom_kernel=_USE_CUSTOM_KERNELS,
+    )
+    (
+        positions,
+        node_input,
+        node_attr,
+        edge_attr,
+        batch,
+        edge_src,
+        edge_dst,
+    ) = _model_graph(
+        config,
+        input_dim=irreps_in.dim,
+        node_attr_dim=irreps_node_attr.dim,
+        edge_attr_dim=irreps_edge_attr.dim,
+    )
+
+    def forward(pos, features, attributes, edge_attributes):
         return module.forward_with_edges(
             pos,
             features,
             attributes,
             edge_attributes,
-            graph_batch,
-            source,
-            destination,
+            batch,
+            edge_src,
+            edge_dst,
             num_graphs=1,
         ).array
 
-    train, compile_train = _module_train_functions(
-        module, lambda *args: mx.mean(raw(*args) ** 2), arguments
+    train, compile_train = _module_grad(
+        module,
+        lambda pos, features, attributes, edge_attributes: mx.mean(
+            forward(pos, features, attributes, edge_attributes) ** 2
+        ),
+        positions,
+        node_input,
+        node_attr,
+        edge_attr,
     )
-
-    def compile_forward():
-        compiled = mx.compile(raw)
-        return lambda: compiled(*arguments)
-
+    arguments = positions, node_input, node_attr, edge_attr
     return _task(
-        name="v2106_network",
+        name="v2106_attributed_network",
         config=config,
-        item_count=edge_src.shape[0] * len(module.mp.layers),
-        forward=lambda: raw(*arguments),
-        compile_forward=compile_forward,
+        item_count=config["nodes"],
+        forward=lambda: forward(*arguments),
+        compile_forward=_compiled(forward, *arguments),
         train=train,
         compile_train=compile_train,
+        dispatch=_model_dispatch(supports_kernels=True),
     )
 
 
@@ -509,16 +552,10 @@ BUILDERS = {
     "spherical_harmonics": build_spherical_harmonics,
     "full_tensor_product": build_full_tensor_product,
     "fully_connected_tensor_product": build_fully_connected_tensor_product,
-    "linear": build_linear,
     "weighted_tensor_product_uvu": build_weighted_tensor_product_uvu,
+    "linear": build_linear,
     "scatter_sum": build_scatter_sum,
-    "gate": build_gate,
-    "radial_mlp": build_radial_mlp,
-    "v2106_convolution": build_v2106_convolution,
-    "v2106_message_passing": build_v2106_message_passing,
-    "v2106_network": build_v2106_network,
+    "gate_points_2102": build_gate_points_2102,
+    "v2106_simple_network": build_v2106_simple_network,
+    "v2106_attributed_network": build_v2106_attributed_network,
 }
-
-
-def build_tasks(workloads: dict[str, dict[str, Any]]) -> list[Task]:
-    return [BUILDERS[name](config) for name, config in workloads.items()]

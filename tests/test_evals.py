@@ -1,4 +1,4 @@
-"""Tests for the cross-framework evaluation harness."""
+"""Tests for the compact three-way evaluation harness."""
 
 from __future__ import annotations
 
@@ -7,42 +7,62 @@ import json
 import pytest
 
 from evals.common import SCHEMA_VERSION, load_documents, summarize, write_document
-from evals.plot_results import main as plot_main, speedup_entries, write_scaling_plots
-from evals.run import parse_args, selected_workers, worker_command
-from evals.run_backend import apply_overrides
+from evals.plot_results import (
+    aggregate_rows,
+    latency_entries,
+    main as plot_main,
+    speedup_entries,
+)
+from evals.run import WORKERS, parse_args, repeat_count, worker_command
+from evals.run_backend import apply_overrides, parse_args as parse_worker_args
 from evals.workloads import case_names, get_workloads, ring_edges, spherical_irreps
 
 
-def _row(backend, execution, median, *, phase="forward"):
+def _row(backend, median, *, phase="forward"):
     return {
         "preset": "smoke",
         "case": "linear",
         "phase": phase,
         "backend": backend,
-        "execution": execution,
+        "execution": "eager" if backend == "torch-cpu" else "compiled",
+        "dispatch": "torch-eager" if backend == "torch-cpu" else "general-mlx",
         "status": "ok",
         "median_ms": median,
         "p25_ms": median * 0.9,
         "p75_ms": median * 1.1,
         "items_per_second": 1000 / median,
-        "compile_ms": 5.0 if execution == "compiled" else None,
-        "peak_memory_bytes": 1_000_000 if backend == "mlx" else None,
+        "compile_ms": None if backend == "torch-cpu" else 5.0,
+        "peak_memory_bytes": None if backend == "torch-cpu" else 1_000_000,
         "item_count": 64,
         "config": {"items": 64, "mul": 2, "lmax": 1},
         "error": None,
     }
 
 
-def test_statistics_and_workload_helpers() -> None:
+def test_statistics_and_workload_surface_are_small_and_fixed() -> None:
     summary = summarize([4.0, 1.0, 3.0, 2.0])
     assert summary["median_ms"] == 2.5
     assert summary["p25_ms"] == 1.75
     assert summary["p75_ms"] == 3.25
+    assert set(case_names()) == {
+        "spherical_harmonics",
+        "full_tensor_product",
+        "fully_connected_tensor_product",
+        "weighted_tensor_product_uvu",
+        "linear",
+        "scatter_sum",
+        "gate_points_2102",
+        "v2106_simple_network",
+        "v2106_attributed_network",
+    }
     assert set(get_workloads("smoke")) == set(case_names())
+    assert set(get_workloads("full")) == set(case_names())
     assert spherical_irreps(3, 2) == "3x0e + 3x1o + 3x2e"
     source, destination = ring_edges(4, 2)
     assert len(source) == len(destination) == 8
     assert all(left != right for left, right in zip(source, destination, strict=True))
+    with pytest.raises(ValueError, match="unknown preset"):
+        get_workloads("medium")
 
 
 def test_overrides_are_typed_and_validated() -> None:
@@ -56,15 +76,66 @@ def test_overrides_are_typed_and_validated() -> None:
         apply_overrides(workloads, ["linear.missing=1"])
 
 
-def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
+def test_runner_always_builds_exactly_three_worker_commands(tmp_path) -> None:
+    args = parse_args(
+        [
+            "--preset",
+            "full",
+            "--case",
+            "linear",
+            "--phase",
+            "forward",
+            "--warmup",
+            "2",
+            "--samples",
+            "4",
+        ]
+    )
+    assert WORKERS == ("torch-cpu", "mlx", "mlx-kernel")
+    assert repeat_count(args) == 5
+    for backend in WORKERS:
+        interpreter = tmp_path / backend
+        command = worker_command(
+            backend,
+            interpreter,
+            tmp_path / f"{backend}.json",
+            args,
+        )
+        assert command[command.index("--backend") + 1] == backend
+        assert command[command.index("--preset") + 1] == "full"
+        assert "--device" not in command
+        assert "--mlx-kernels" not in command
+        assert "--torch-compile" not in command
+
+
+def test_runner_repeat_defaults_and_validation() -> None:
+    assert repeat_count(parse_args(["--preset", "smoke"])) == 1
+    assert repeat_count(parse_args(["--preset", "full"])) == 5
+    assert repeat_count(
+        parse_args(["--preset", "full", "--repeats", "3"])
+    ) == 3
+    with pytest.raises(ValueError, match="positive"):
+        repeat_count(parse_args(["--repeats", "0"]))
+
+
+def test_worker_cli_has_only_the_three_public_backend_labels() -> None:
+    for backend in WORKERS:
+        args = parse_worker_args(
+            ["--backend", backend, "--output", f"{backend}.json"]
+        )
+        assert args.backend == backend
+    with pytest.raises(SystemExit):
+        parse_worker_args(["--backend", "torch-mps", "--output", "bad.json"])
+
+
+def test_result_round_trip_speedups_and_compact_plots(tmp_path) -> None:
     rows = [
-        _row("torch-mps", "eager", 4.0),
-        _row("torch-cpu", "eager", 10.0),
-        _row("mlx", "eager", 2.0),
-        _row("mlx", "compiled", 1.0),
-        _row("torch-mps", "eager", 8.0, phase="train"),
-        _row("torch-cpu", "eager", 12.0, phase="train"),
-        _row("mlx", "compiled", 2.0, phase="train"),
+        _row("torch-cpu", 10.0),
+        _row("mlx", 4.0),
+        _row("mlx-kernel", 2.0),
+        _row("torch-cpu", 12.0, phase="train"),
+        _row("mlx", 6.0, phase="train"),
+        _row("mlx-kernel", 3.0, phase="train"),
     ]
     result_path = tmp_path / "results.json"
     metadata = {
@@ -76,136 +147,183 @@ def test_result_round_trip_speedups_and_dependency_free_plots(tmp_path) -> None:
     loaded_metadata, loaded_rows = load_documents([result_path])
     assert loaded_metadata == [metadata]
     assert loaded_rows == rows
-    forward_speedups = speedup_entries(rows, "forward")
-    assert sorted(entry[1] for entry in forward_speedups) == [2.0, 4.0, 5.0, 10.0]
+    assert [entry[1] for entry in speedup_entries(rows, "forward")] == [2.5, 5.0]
 
     output = tmp_path / "plots"
     assert plot_main([str(result_path), "--output-dir", str(output)]) == 0
-    expected = {
+    assert {path.name for path in output.iterdir()} == {
         "latency_forward.svg",
         "latency_train.svg",
         "speedup_forward.svg",
         "speedup_train.svg",
-        "kernel_speedup_forward.svg",
-        "kernel_speedup_train.svg",
-        "compile_cost.svg",
-        "peak_memory.svg",
         "summary.csv",
         "report.html",
     }
-    assert expected == {path.name for path in output.iterdir()}
-    assert "4.00×" in (output / "speedup_forward.svg").read_text()
+    assert "5.00×" in (output / "speedup_forward.svg").read_text()
     latency = (output / "latency_forward.svg").read_text()
-    assert "torch-mps-eager" in latency
-    assert "torch-cpu-eager" in latency
+    assert "torch-cpu" in latency
+    assert "mlx-kernel" in latency
+    report = (output / "report.html").read_text()
+    assert "Selected path" in report
+    assert "general-mlx" in report
     assert json.loads(result_path.read_text())["metadata"]["schema_version"] == 1
 
 
-def test_scaling_plot_uses_multiple_workload_sizes(tmp_path) -> None:
-    small = _row("mlx", "compiled", 2.0)
-    large = _row("mlx", "compiled", 3.0)
-    large["item_count"] = 128
-    large["items_per_second"] = 128_000 / 3
-    large["config"] = {"items": 128, "mul": 2, "lmax": 1}
-    generated = write_scaling_plots(tmp_path, [small, large])
-    assert generated == ["scaling_linear.svg"]
-    plot = (tmp_path / generated[0]).read_text()
-    assert "throughput scaling" in plot
-    assert "mlx-compiled" in plot
+def test_plots_aggregate_independent_repeats_with_iqr_error_bars(
+    tmp_path,
+) -> None:
+    rows = []
+    for repeat_index, scale in enumerate((0.8, 0.9, 1.0, 1.1, 1.2), start=1):
+        for backend, median in (
+            ("torch-cpu", 10.0 * scale),
+            ("mlx", 5.0 * scale),
+            ("mlx-kernel", 2.0 * scale),
+        ):
+            row = _row(backend, median)
+            row["repeat_index"] = repeat_index
+            rows.append(row)
+
+    latency = latency_entries(rows, "forward")
+    assert latency[0].repeat_count == 5
+    assert latency[0].value == 10.0
+    assert latency[0].lower == 9.0
+    assert latency[0].upper == 11.0
+    speedups = speedup_entries(rows, "forward")
+    assert [entry.value for entry in speedups] == [2.0, 5.0]
+    assert all(entry.repeat_count == 5 for entry in speedups)
+
+    aggregated = aggregate_rows(rows)
+    assert len(aggregated) == 3
+    assert all(row["repeat_count"] == 5 for row in aggregated)
+    assert all(row["successful_repeats"] == 5 for row in aggregated)
+    partial = aggregate_rows(rows[:-1], expected_repeats=5)
+    kernel = next(
+        row for row in partial if row["backend"] == "mlx-kernel"
+    )
+    assert kernel["status"] == "partial"
+    assert kernel["successful_repeats"] == 4
+    assert kernel["repeat_count"] == 5
+
+    result_path = tmp_path / "repeated.json"
+    write_document(
+        result_path,
+        {
+            "schema_version": SCHEMA_VERSION,
+            "backend": "combined",
+            "preset": "full",
+        },
+        rows,
+    )
+    output = tmp_path / "plots"
+    assert plot_main([str(result_path), "--output-dir", str(output)]) == 0
+    svg = (output / "latency_forward.svg").read_text()
+    assert 'class="error-bar"' in svg
+    assert "n=5" in svg
+    report = (output / "report.html").read_text()
+    assert "Between-run IQR" in report
+    assert "5/5" in report
 
 
-def test_torch_both_expands_to_isolated_mps_and_cpu_workers(tmp_path) -> None:
-    args = parse_args(
-        [
-            "--backend",
-            "both",
-            "--torch-device",
-            "both",
-            "--mlx-kernels",
-            "both",
-            "--torch-python",
-            str(tmp_path / "torch-python"),
-        ]
-    )
-    assert selected_workers(args) == [
-        ("mlx", None, "on"),
-        ("mlx", None, "off"),
-        ("torch", "mps", None),
-        ("torch", "cpu", None),
-    ]
-    for mode in ("on", "off"):
-        mlx_command = worker_command(
-            "mlx",
-            args.mlx_python,
-            tmp_path / f"mlx-{mode}.json",
-            args,
-            mlx_kernels=mode,
-        )
-        assert mlx_command[mlx_command.index("--mlx-kernels") + 1] == mode
-    command = worker_command(
-        "torch",
-        args.torch_python,
-        tmp_path / "torch-cpu.json",
-        args,
-        torch_device="cpu",
-    )
-    assert command[command.index("--device") + 1] == "cpu"
+def test_backend_builders_match_the_documented_case_set() -> None:
+    from evals import mlx_cases, torch_cases
+
+    assert tuple(mlx_cases.BUILDERS) == case_names()
+    assert tuple(torch_cases.BUILDERS) == case_names()
 
 
 @pytest.mark.mlx
-@pytest.mark.parametrize("enabled", [False, True])
-def test_v2106_mlx_builders_pass_selected_kernel_mode(enabled, monkeypatch) -> None:
+def test_model_benchmarks_report_kernel_scope() -> None:
     from evals import mlx_cases
-    from e3nn_mlx.models.v2106 import (
-        Convolution,
-        MessagePassing,
-        NetworkForAGraphWithAttributes,
+    from e3nn_mlx.compat import mlx_metal_available
+
+    config = {
+        "nodes": 8,
+        "neighbors": 2,
+        "mul": 2,
+        "layers": 1,
+        "lmax": 1,
+    }
+    mlx_cases.configure(use_custom_kernels=True)
+    gate = mlx_cases.build_gate_points_2102(config)
+    simple = mlx_cases.build_v2106_simple_network(config)
+    attributed = mlx_cases.build_v2106_attributed_network(config)
+    mlx_cases.configure(use_custom_kernels=False)
+
+    assert gate.dispatch == "general-mlx (model has no kernel toggle)"
+    expected = (
+        "mixed-model-kernels"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
+    )
+    assert simple.dispatch == expected
+    assert attributed.dispatch == expected
+
+
+@pytest.mark.mlx
+def test_mlx_benchmark_reports_actual_tensor_product_dispatch() -> None:
+    from evals import mlx_cases
+    from e3nn_mlx.compat import mlx_metal_available
+
+    mlx_cases.configure(use_custom_kernels=True)
+    small = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 16, "mul": 8, "lmax": 2}
+    )
+    dense = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 64, "mul": 8, "lmax": 2}
+    )
+    harmonics = mlx_cases.build_spherical_harmonics(
+        {"items": 16, "lmax": 2}
+    )
+    scatter = mlx_cases.build_scatter_sum(
+        {"items": 16, "nodes": 4, "width": 3}
+    )
+    mlx_cases.configure(use_custom_kernels=False)
+    general = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 16, "mul": 8, "lmax": 2}
     )
 
-    seen = {"convolution": [], "message_passing": [], "network": []}
-
-    def record_init(kind, original):
-        def wrapped(instance, *args, **kwargs):
-            seen[kind].append(kwargs.get("use_custom_kernel"))
-            original(instance, *args, **kwargs)
-
-        return wrapped
-
-    monkeypatch.setattr(
-        Convolution,
-        "__init__",
-        record_init("convolution", Convolution.__init__),
+    expected = (
+        "metal-scalar-paths"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
     )
-    monkeypatch.setattr(
-        MessagePassing,
-        "__init__",
-        record_init("message_passing", MessagePassing.__init__),
+    assert small.dispatch == expected
+    assert harmonics.dispatch == (
+        "metal-spherical-harmonics"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
     )
-    monkeypatch.setattr(
-        NetworkForAGraphWithAttributes,
-        "__init__",
-        record_init("network", NetworkForAGraphWithAttributes.__init__),
+    assert scatter.dispatch == (
+        "metal-scatter-sum"
+        if mlx_metal_available()
+        else "general-mlx (kernel fallback)"
     )
-    mlx_cases.configure(use_custom_kernels=enabled)
-    try:
-        workloads = get_workloads(
-            "smoke",
-            ["v2106_convolution", "v2106_message_passing", "v2106_network"],
-        )
+    assert dense.dispatch == "general-mlx (kernel fallback)"
+    assert general.dispatch == "general-mlx"
 
-        mlx_cases.build_v2106_convolution(workloads["v2106_convolution"])
-        assert seen["convolution"] == [enabled]
 
-        seen["convolution"].clear()
-        mlx_cases.build_v2106_message_passing(workloads["v2106_message_passing"])
-        assert seen["message_passing"] == [enabled]
-        assert seen["convolution"] and set(seen["convolution"]) == {enabled}
+@pytest.mark.mlx
+def test_mlx_benchmark_reports_non_metal_kernel_fallback(monkeypatch) -> None:
+    import e3nn_mlx.compat as compat
+    import e3nn_mlx.ops_tp as tp_module
+    from evals import mlx_cases
 
-        seen["convolution"].clear()
-        seen["message_passing"].clear()
-        mlx_cases.build_v2106_network(workloads["v2106_network"])
-        assert seen["network"] == [enabled]
-        assert seen["message_passing"] == [enabled]
-        assert seen["convolution"] and set(seen["convolution"]) == {enabled}
-    finally:
-        mlx_cases.configure(use_custom_kernels=True)
+    monkeypatch.setattr(compat, "mlx_metal_available", lambda: False)
+    monkeypatch.setattr(tp_module, "mlx_metal_available", lambda: False)
+    mlx_cases.configure(use_custom_kernels=True)
+    task = mlx_cases.build_fully_connected_tensor_product(
+        {"items": 16, "mul": 8, "lmax": 2}
+    )
+    harmonics = mlx_cases.build_spherical_harmonics(
+        {"items": 16, "lmax": 2}
+    )
+    scatter = mlx_cases.build_scatter_sum(
+        {"items": 16, "nodes": 4, "width": 3}
+    )
+    model_dispatch = mlx_cases._model_dispatch(supports_kernels=True)
+    mlx_cases.configure(use_custom_kernels=False)
+
+    assert task.dispatch == "general-mlx (kernel fallback)"
+    assert harmonics.dispatch == "general-mlx (kernel fallback)"
+    assert scatter.dispatch == "general-mlx (kernel fallback)"
+    assert model_dispatch == "general-mlx (kernel fallback)"
