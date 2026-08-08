@@ -1,6 +1,6 @@
 # Benchmarks
 
-Benchmark entry points land in later steps once numerical MLX operators exist.
+Benchmark entry points land in later steps once numerical MLX operators exist
 
 Planned coverage:
 
