@@ -19,7 +19,7 @@ class Wigner3jKey:
 @dataclass(frozen=True, slots=True)
 class WignerDKey:
     l: int
-    convention: str = "zyz"
+    convention: str = "yxy"
 
     @property
     def irrep(self) -> Irrep:

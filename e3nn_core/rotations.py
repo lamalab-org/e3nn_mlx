@@ -11,7 +11,7 @@ class RotationAngles:
     alpha: float
     beta: float
     gamma: float
-    convention: str = "zyz"
+    convention: str = "yxy"
 
     def normalized(self) -> RotationAngles:
         return RotationAngles(
