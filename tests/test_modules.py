@@ -49,7 +49,7 @@ def test_norm_and_dot_semantics() -> None:
     array = IrrepsArray("0e + 1o", mlx_backend.asarray([[2.0, 3.0, 4.0, 0.0]]))
     norms = norm(array)
     dots = dot(array, array)
-    assert str(norms.irreps) == "0e+0e"
+    assert str(norms.irreps) == "1x0e+1x0e"
     assert norms.array.tolist()[0][0] == 2.0
     assert abs(norms.array.tolist()[0][1] - 5.0) < 1e-6
     assert dots.array.tolist()[0] == [4.0, 25.0]
@@ -60,7 +60,7 @@ def test_cross_returns_axial_vector() -> None:
     left = IrrepsArray("1o", mlx_backend.asarray([[1.0, 0.0, 0.0]]))
     right = IrrepsArray("1o", mlx_backend.asarray([[0.0, 1.0, 0.0]]))
     out = cross(left, right)
-    assert str(out.irreps) == "1e"
+    assert str(out.irreps) == "1x1e"
     assert out.array.tolist()[0] == [0.0, 0.0, 1.0]
 
 

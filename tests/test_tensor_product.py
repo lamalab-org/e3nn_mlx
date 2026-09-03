@@ -22,13 +22,13 @@ def _assert_close(actual, expected, tol: float = 1e-6) -> None:
 
 def test_tensor_product_symbolic_plan() -> None:
     plan = tensor_product("1o", "1o")
-    assert str(plan.irreps_out) == "0e+1e+2e"
+    assert str(plan.irreps_out) == "1x0e+1x1e+1x2e"
     assert [str(inst.ir_out) for inst in plan.instructions] == ["0e", "1e", "2e"]
 
 
 def test_tensor_product_weighted_plan_tracks_weight_size() -> None:
     plan = tensor_product_plan("2x0e", "1o", "1o", weighted=True)
-    assert str(plan.irreps_out) == "1o"
+    assert str(plan.irreps_out) == "1x1o"
     assert plan.weight_numel == 2
 
 
@@ -44,14 +44,14 @@ def test_tensor_product_weighted_mode_sizes() -> None:
 
 def test_tensor_product_symbolic_higher_l_selection_rules() -> None:
     plan = tensor_product("2e", "1o")
-    assert str(plan.irreps_out) == "1o+2o+3o"
+    assert str(plan.irreps_out) == "1x1o+1x2o+1x3o"
     assert [str(inst.ir_out) for inst in plan.instructions] == ["1o", "2o", "3o"]
 
 
 def test_tensor_product_symbolic_connection_modes() -> None:
     assert str(tensor_product("2x0e", "3x0e", mode="uvu").irreps_out) == "2x0e"
     assert str(tensor_product("2x0e", "3x0e", mode="uvv").irreps_out) == "3x0e"
-    assert str(tensor_product("2x0e", "2x0e", mode="uuw").irreps_out) == "0e"
+    assert str(tensor_product("2x0e", "2x0e", mode="uuw").irreps_out) == "1x0e"
     assert str(tensor_product("2x0e", "2x0e", mode="uuu").irreps_out) == "2x0e"
     assert str(tensor_product("2x0e", "3x0e", mode="uvuv").irreps_out) == "6x0e"
     assert str(tensor_product("3x0e", "3x0e", mode="uvu<v").irreps_out) == "3x0e"
@@ -146,7 +146,7 @@ def test_tensor_product_higher_l_output_shape() -> None:
     left = IrrepsArray("2e", mlx_backend.asarray([[1.0, 0.0, 0.0, 0.0, 0.0]]))
     right = IrrepsArray("1o", mlx_backend.asarray([[0.0, 1.0, 0.0]]))
     result = tensor_product(left, right)
-    assert str(result.irreps) == "1o+2o+3o"
+    assert str(result.irreps) == "1x1o+1x2o+1x3o"
     assert result.shape == (1, 3 + 5 + 7)
 
 

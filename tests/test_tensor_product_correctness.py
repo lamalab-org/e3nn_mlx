@@ -400,6 +400,6 @@ def test_tensor_square_matches_explicit_tensor_product_on_user_example() -> None
     array = IrrepsArray("5x1e+2e", mlx_backend.asarray([[float(i) for i in range(1, 21)]]))
     wrapper = TensorSquare("5x1e + 2e")
     out = wrapper(array)
-    assert str(out.irreps) == "16x0e+15x1e+21x2e+5x3e+4e"
+    assert str(out.irreps) == "16x0e+15x1e+21x2e+5x3e+1x4e"
     assert repr(wrapper) == "TensorSquare(5x1e+1x2e -> 16x0e+15x1e+21x2e+5x3e+1x4e | 58 paths | 0 weights)"
     assert out.shape == (1, Irreps("16x0e+15x1e+21x2e+5x3e+4e").dim)

@@ -159,8 +159,7 @@ class MulIrrep:
         return cls(mul=mul, ir=Irrep(l, _parse_parity_token(match.group("parity"), l)))
 
     def __str__(self) -> str:
-        if self.mul == 1:
-            return str(self.ir)
+        # Upstream always prints the multiplicity, including "1x".
         return f"{self.mul}x{self.ir}"
 
 
