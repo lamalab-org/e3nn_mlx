@@ -5,6 +5,7 @@ from __future__ import annotations
 from math import pi
 
 from e3nn_core.irreps import Irrep, Irreps
+from e3nn_core.runtime import register_runtime
 from e3nn_core.wigner import so3_generators
 
 from .compat import require_mlx
@@ -424,3 +425,61 @@ def _det3x3(matrix):
         + matrix[..., 0, 2]
         * (matrix[..., 1, 0] * matrix[..., 2, 1] - matrix[..., 1, 1] * matrix[..., 2, 0])
     )
+
+
+def irrep_wigner_d_from_quaternion(irrep: Irrep | str, quaternion, *, k=0):
+    alpha, beta, gamma = quaternion_to_angles(quaternion)
+    return irrep_wigner_d(irrep, alpha, beta, gamma, k=k)
+
+
+def irreps_wigner_d_from_quaternion(irreps: Irreps | str, quaternion, *, k=0):
+    alpha, beta, gamma = quaternion_to_angles(quaternion)
+    return irreps_wigner_d(irreps, alpha, beta, gamma, k=k)
+
+
+def irrep_wigner_d_from_axis_angle(irrep: Irrep | str, axis, angle):
+    alpha, beta, gamma = axis_angle_to_angles(axis, angle)
+    return irrep_wigner_d(irrep, alpha, beta, gamma)
+
+
+def irreps_wigner_d_from_axis_angle(irreps: Irreps | str, axis, angle):
+    alpha, beta, gamma = axis_angle_to_angles(axis, angle)
+    return irreps_wigner_d(irreps, alpha, beta, gamma)
+
+
+def irreps_randn(irreps: Irreps | str, *shape, normalization: str = "component", dtype=None):
+    """Upstream ``Irreps.randn``: ``shape`` marks the representation axis with -1."""
+
+    mx, _ = require_mlx()
+    irreps = Irreps(irreps)
+    if shape.count(-1) != 1:
+        raise ValueError("exactly one dimension of the requested shape must be -1")
+    axis = shape.index(-1)
+    left, right = shape[:axis], shape[axis + 1 :]
+    dtype = dtype or mx.float32
+    if normalization == "component":
+        return mx.random.normal((*left, irreps.dim, *right)).astype(dtype)
+    if normalization == "norm":
+        blocks = []
+        for part in irreps:
+            if part.mul == 0:
+                continue
+            block = mx.random.normal((*left, part.mul, part.ir.dim, *right)).astype(dtype)
+            norm = mx.sqrt(mx.sum(block * block, axis=axis + 1, keepdims=True))
+            block = block / mx.maximum(norm, mx.array(1e-12, dtype=block.dtype))
+            blocks.append(mx.reshape(block, (*left, part.mul * part.ir.dim, *right)))
+        if not blocks:
+            return mx.zeros((*left, 0, *right), dtype=dtype)
+        return mx.concatenate(blocks, axis=axis)
+    raise ValueError(f"unsupported normalization {normalization!r}")
+
+
+register_runtime("irrep_D_from_angles", lambda irrep, a, b, g, k=0: irrep_wigner_d(irrep, a, b, g, k=k))
+register_runtime("irrep_D_from_matrix", irrep_wigner_d_from_matrix)
+register_runtime("irrep_D_from_quaternion", lambda irrep, q, k=0: irrep_wigner_d_from_quaternion(irrep, q, k=k))
+register_runtime("irrep_D_from_axis_angle", irrep_wigner_d_from_axis_angle)
+register_runtime("irreps_D_from_angles", lambda irreps, a, b, g, k=0: irreps_wigner_d(irreps, a, b, g, k=k))
+register_runtime("irreps_D_from_matrix", irreps_wigner_d_from_matrix)
+register_runtime("irreps_D_from_quaternion", lambda irreps, q, k=0: irreps_wigner_d_from_quaternion(irreps, q, k=k))
+register_runtime("irreps_D_from_axis_angle", irreps_wigner_d_from_axis_angle)
+register_runtime("irreps_randn", irreps_randn)

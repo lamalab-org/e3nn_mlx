@@ -5,6 +5,7 @@ from .instructions import TensorProductInstruction, generate_tensor_product_inst
 from .irreps import Irrep, Irreps, MulIrrep, SortResult
 from .normalization import NormalizationMetadata
 from .rotations import RotationAngles
+from .runtime import register_runtime, registered_runtimes
 from .wigner import WignerDKey, Wigner3jKey, change_basis_real_to_complex, so3_generators, su2_generators
 
 __all__ = [
@@ -14,6 +15,8 @@ __all__ = [
     "MulIrrep",
     "NormalizationMetadata",
     "RotationAngles",
+    "register_runtime",
+    "registered_runtimes",
     "SortResult",
     "TensorProductInstruction",
     "Wigner3jKey",
