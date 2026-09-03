@@ -110,8 +110,10 @@ class Irrep:
             raise ValueError("lmax must be non-negative")
         l = 0
         while lmax is None or l <= lmax:
-            yield Irrep(l, 1)
-            yield Irrep(l, -1)
+            # Upstream yields the natural parity of l first: 0e, 0o, 1o, 1e, 2e, 2o, ...
+            natural = (-1) ** l
+            yield Irrep(l, natural)
+            yield Irrep(l, -natural)
             l += 1
 
 
