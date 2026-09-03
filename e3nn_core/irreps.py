@@ -128,6 +128,17 @@ class MulIrrep:
     def dim(self) -> int:
         return self.mul * self.ir.dim
 
+    def __iter__(self) -> Iterator[int | Irrep]:
+        """Support upstream's ``mul, ir = mul_irrep`` unpacking."""
+
+        return iter((self.mul, self.ir))
+
+    def __len__(self) -> int:
+        return 2
+
+    def __getitem__(self, item: int) -> int | Irrep:
+        return (self.mul, self.ir)[item]
+
     @classmethod
     def parse(cls, spec: str | Irrep | MulIrrep | tuple[int, Irrep | str]) -> MulIrrep:
         if isinstance(spec, cls):
