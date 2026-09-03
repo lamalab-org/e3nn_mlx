@@ -92,6 +92,12 @@ def _su2_clebsch_gordan_coeff(
 @functools.lru_cache(maxsize=None)
 def clebsch_gordan(ir_in1: Irrep | str, ir_in2: Irrep | str, ir_out: Irrep | str) -> tuple[tuple[tuple[float, ...], ...], ...]:
     key = ClebschGordanKey.from_irreps(ir_in1, ir_in2, ir_out)
+    # These arguments carry a parity, unlike wigner_3j's bare degrees, so an
+    # O(3)-forbidden coupling is a caller error rather than a zero block.
+    if key.ir_in1.p * key.ir_in2.p != key.ir_out.p:
+        raise ValueError(
+            f"parity mismatch: {key.ir_in1} x {key.ir_in2} cannot couple to {key.ir_out}"
+        )
     return _so3_clebsch_gordan(key.ir_in1.l, key.ir_in2.l, key.ir_out.l)
 
 

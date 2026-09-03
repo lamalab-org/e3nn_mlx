@@ -221,7 +221,8 @@ class Irreps:
     def lmax(self) -> int:
         nonzero = [part.ir.l for part in self.parts if part.mul > 0]
         if not nonzero:
-            return -1
+            # Upstream raises here rather than reporting a sentinel degree.
+            raise ValueError("Cannot get lmax of empty Irreps")
         return max(nonzero)
 
     @property
