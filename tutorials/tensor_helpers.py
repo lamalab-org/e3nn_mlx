@@ -316,8 +316,14 @@ class SphericalTensor(IrrepTensor):
                 if len(reshaped) > 1
                 else reshaped[0]
             )
+            # Keep the historical layout -- copies of one degree concatenated,
+            # lower multiplicity first -- but report each copy's TRUE parity
+            # instead of collapsing the degree to a single SO(3)-only label.
+            # The byte layout is identical either way, so the tutorial's slices
+            # still land on the same components, while a mixed block such as
+            # 1o + 1o + 1e is no longer mislabelled as 3x1o.
+            representations.extend((part.mul, degree, part.ir.p) for part, _ in entries)
             multiplicity = sum(part.mul for part, _ in entries)
-            representations.append((multiplicity, degree, 0))
             arrays.append(
                 grouped.reshape(*product.leading_shape, multiplicity * (2 * degree + 1))
             )
