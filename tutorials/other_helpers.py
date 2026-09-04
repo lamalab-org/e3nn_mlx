@@ -72,19 +72,33 @@ def view(atoms: ase.Atom, centre=True):
     # nglview.view.center(selection='0')
     return viewer
 
-def show_array(positions, calc=None):
+def show_array(positions, calc=None, zmax=None):
+    """Interactive heat map of ``calc(positions)`` under rotation and translation.
+
+    ``zmax`` bounds the diverging colour scale symmetrically about zero. It
+    defaults to the peak magnitude of the initial frame: a fixed scale keeps
+    frames comparable, which is the point of the demo, but it has to be a
+    scale the data actually fits in.
+    """
+
     positions = np.asarray(positions)
 
     if calc is None:
         calc = lambda x: x
 
-    initial_data = np.asarray(calc(positions))
+    # Transposed to match the orientation every update below writes, so the
+    # first frame is not rendered sideways relative to the rest.
+    initial_data = np.asarray(calc(positions)).T
+
+    if zmax is None:
+        peak = float(np.max(np.abs(initial_data))) if initial_data.size else 0.0
+        zmax = peak if peak > 0.0 else 1.0
 
     fig = px.imshow(
         initial_data,
         color_continuous_scale="RdBu",
-        zmin=-5,
-        zmax=5,
+        zmin=-zmax,
+        zmax=zmax,
     )
     widget = go.FigureWidget(fig)
 
