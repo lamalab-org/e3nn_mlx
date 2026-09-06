@@ -27,10 +27,6 @@ COLORS = {
     "torch-cpu": "#2a78d6",
     "mlx": "#eb6834",
     "mlx-kernel": "#1baf7a",
-    # Diverging poles about parity. blue<->red is dE 23.8 (protan); the previous
-    # green/red was 8.6 -- the pairing protanopes confuse most.
-    "speedup": "#2a78d6",
-    "slowdown": "#d03b3b",
 }
 INK = "#1c1c1a"
 INK_MUTED = "#6b6a65"
@@ -123,11 +119,9 @@ def speedup_entries(rows, phase: str):
                 BarEntry(
                     f"{case} · {backend} vs torch-cpu",
                     summary["median_ms"],
-                    (
-                        "speedup"
-                        if summary["median_ms"] >= 1.0
-                        else "slowdown"
-                    ),
+                    # Colour carries identity (which backend); faster/slower is
+                    # already encoded by position relative to the parity rule.
+                    backend,
                     summary["p25_ms"],
                     summary["p75_ms"],
                     len(ratios),
@@ -547,8 +541,8 @@ def main(argv=None) -> int:
             groups=group_by_case(speedup_entries(rows, phase)),
             unit="x",
             series=[
-                ("speedup", "Faster than Torch CPU"),
-                ("slowdown", "Slower"),
+                ("mlx", "MLX"),
+                ("mlx-kernel", "MLX + kernels"),
             ],
             reference=1.0,
             label_dots=True,
