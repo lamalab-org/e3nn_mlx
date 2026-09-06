@@ -130,6 +130,45 @@ def spherical_harmonic_surfaces(
     return coordinates, values, spherical_harmonic_centers(lmax)
 
 
+def _write_transparent_gif(
+    path: Path, frames_rgba, duration_ms: int, size_px: int
+) -> None:
+    """Assemble RGBA frames into a GIF whose background is transparent.
+
+    A GIF carries transparency as a single reserved palette index, so each
+    frame is quantised to 255 colours and index 255 is kept for the mask.
+    ``disposal=2`` clears each frame before the next is drawn; without it the
+    transparent regions accumulate and earlier frames ghost through.
+
+    Frames are resampled to ``size_px``. A HiDPI backend reports a device pixel
+    ratio of 2, so the grabbed buffer is twice the requested figure size, and
+    without this the output would silently depend on the display it was
+    rendered on. Downsampling also supersamples the surface edges.
+    """
+
+    from PIL import Image
+
+    images = []
+    for array in frames_rgba:
+        frame = Image.fromarray(array, "RGBA")
+        if frame.size != (size_px, size_px):
+            frame = frame.resize((size_px, size_px), Image.LANCZOS)
+        alpha = frame.getchannel("A")
+        indexed = frame.convert("RGB").quantize(colors=255)
+        indexed.paste(255, alpha.point(lambda value: 255 if value <= 128 else 0))
+        images.append(indexed)
+    images[0].save(
+        path,
+        save_all=True,
+        append_images=images[1:],
+        duration=duration_ms,
+        loop=0,
+        transparency=255,
+        disposal=2,
+        optimize=False,
+    )
+
+
 def render_animation(
     output: str | Path,
     *,
@@ -138,8 +177,13 @@ def render_animation(
     frames: int = 40,
     duration_ms: int = 30,
     size_px: int = 500,
+    transparent: bool = False,
 ) -> Path:
-    """Render the reference coefficient rotation as a GIF."""
+    """Render the reference coefficient rotation as a GIF.
+
+    ``transparent=True`` leaves the page showing through the figure instead of
+    painting it white, so the animation sits on any documentation theme.
+    """
 
     if frames < 1:
         raise ValueError("frames must be positive")
@@ -159,8 +203,12 @@ def render_animation(
 
     dpi = 100
     figure = plt.figure(
-        figsize=(size_px / dpi, size_px / dpi), dpi=dpi, facecolor="white"
+        figsize=(size_px / dpi, size_px / dpi),
+        dpi=dpi,
+        facecolor="none" if transparent else "white",
     )
+    if transparent:
+        figure.patch.set_alpha(0.0)
     columns = lmax + 1
     centers = spherical_harmonic_centers(lmax)
     axes = []
@@ -185,6 +233,10 @@ def render_animation(
         # Reference camera: eye=(0, -1.3, 0), up=(0, 0, 1).
         axis.view_init(elev=0.0, azim=-90.0, roll=0.0)
         axis.set_axis_off()
+        if transparent:
+            # A 3D axis still paints its own background rectangle even with the
+            # axis decorations switched off.
+            axis.patch.set_alpha(0.0)
         axes.append(axis)
     color_map = LinearSegmentedColormap.from_list(
         "e3nn_bwr",
@@ -220,18 +272,30 @@ def render_animation(
 
     output_path = Path(output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    movie = animation.FuncAnimation(
-        figure, update, frames=frames, interval=duration_ms, blit=False
-    )
-    movie.save(
-        output_path,
-        # GIF delays are stored in centiseconds. An integer frame rate avoids
-        # floating-point truncation turning the requested 30 ms into 20 ms.
-        writer=animation.PillowWriter(
-            fps=max(1, round(1000.0 / duration_ms))
-        ),
-        dpi=dpi,
-    )
+    if transparent:
+        # PillowWriter flattens each frame onto an opaque canvas, so the frames
+        # are grabbed directly and given a reserved transparent palette index.
+        rendered = []
+        for frame in range(frames):
+            update(frame)
+            figure.canvas.draw()
+            rendered.append(
+                np.asarray(figure.canvas.buffer_rgba()).copy()
+            )
+        _write_transparent_gif(output_path, rendered, duration_ms, size_px)
+    else:
+        movie = animation.FuncAnimation(
+            figure, update, frames=frames, interval=duration_ms, blit=False
+        )
+        movie.save(
+            output_path,
+            # GIF delays are stored in centiseconds. An integer frame rate
+            # avoids floating-point truncation turning 30 ms into 20 ms.
+            writer=animation.PillowWriter(
+                fps=max(1, round(1000.0 / duration_ms))
+            ),
+            dpi=dpi,
+        )
     plt.close(figure)
     return output_path
 
@@ -248,6 +312,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--frames", type=int, default=40)
     parser.add_argument("--duration-ms", type=int, default=30)
     parser.add_argument("--size-px", type=int, default=500)
+    parser.add_argument(
+        "--transparent",
+        action="store_true",
+        help="leave the background transparent instead of white",
+    )
     return parser
 
 
@@ -260,6 +329,7 @@ def main() -> int:
         frames=args.frames,
         duration_ms=args.duration_ms,
         size_px=args.size_px,
+        transparent=args.transparent,
     )
     print(output)
     return 0
