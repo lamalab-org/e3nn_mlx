@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="496" viewBox="0 0 1180 496" font-family="system-ui, -apple-system, sans-serif">
+<rect width="100%" height="100%" fill="#fcfcfb"/>
+<text x="34" y="40" font-size="21" font-weight="600" fill="#1c1c1a">Train speedup over Torch CPU</text>
+<text x="34" y="63" font-size="13" fill="#6b6a65">Torch CPU median divided by MLX median, paired by repeat. Right of parity is faster.</text>
+<circle cx="39" cy="84" r="5" fill="#eb6834"/>
+<text x="50" y="88" font-size="12" fill="#6b6a65">MLX</text>
+<circle cx="91.8" cy="84" r="5" fill="#1baf7a"/>
+<text x="102.8" y="88" font-size="12" fill="#6b6a65">MLX + kernels</text>
+<line x1="318.2" y1="106" x2="318.2" y2="428" stroke="#e6e5e1" stroke-width="1"/>
+<text x="318.2" y="446" text-anchor="middle" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">1.00×</text>
+<line x1="445.4" y1="106" x2="445.4" y2="428" stroke="#e6e5e1" stroke-width="1"/>
+<text x="445.4" y="446" text-anchor="middle" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">2.00×</text>
+<line x1="613.5" y1="106" x2="613.5" y2="428" stroke="#e6e5e1" stroke-width="1"/>
+<text x="613.5" y="446" text-anchor="middle" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">5.00×</text>
+<line x1="740.7" y1="106" x2="740.7" y2="428" stroke="#e6e5e1" stroke-width="1"/>
+<text x="740.7" y="446" text-anchor="middle" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">10.00×</text>
+<line x1="867.9" y1="106" x2="867.9" y2="428" stroke="#e6e5e1" stroke-width="1"/>
+<text x="867.9" y="446" text-anchor="middle" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">20.00×</text>
+<line x1="318.2" y1="102" x2="318.2" y2="428" stroke="#6b6a65" stroke-width="1"/>
+<text x="318.2" y="96" text-anchor="middle" font-size="11" fill="#6b6a65">parity</text>
+<text x="236" y="137.0" text-anchor="end" font-size="12" fill="#1c1c1a">full_tensor_product</text>
+<line x1="577.0" y1="133.0" x2="577.2" y2="133.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="575.0" y1="133.0" x2="580.6" y2="133.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="577.0" cy="133.0" r="6.5" fill="#fcfcfb"/><circle cx="577.0" cy="133.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="576.5" y1="133.0" x2="581.6" y2="133.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="577.2" cy="133.0" r="6.5" fill="#fcfcfb"/><circle cx="577.2" cy="133.0" r="5" fill="#1baf7a"/>
+<text x="566.0" y="137.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">4.10×</text>
+<text x="588.2" y="137.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">4.10×</text>
+<rect x="250" y="150.0" width="740" height="34" fill="#00000006"/>
+<text x="236" y="171.0" text-anchor="end" font-size="12" fill="#1c1c1a">fully_connected_tensor_product</text>
+<line x1="650.3" y1="167.0" x2="652.3" y2="167.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="650.3" y1="167.0" x2="655.9" y2="167.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="650.3" cy="167.0" r="6.5" fill="#fcfcfb"/><circle cx="650.3" cy="167.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="649.8" y1="167.0" x2="652.4" y2="167.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="652.3" cy="167.0" r="6.5" fill="#fcfcfb"/><circle cx="652.3" cy="167.0" r="5" fill="#1baf7a"/>
+<text x="639.3" y="171.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">6.11×</text>
+<text x="663.3" y="171.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">6.18×</text>
+<text x="236" y="205.0" text-anchor="end" font-size="12" fill="#1c1c1a">gate_points_2102</text>
+<line x1="638.7" y1="201.0" x2="642.3" y2="201.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="637.7" y1="201.0" x2="641.6" y2="201.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="638.7" cy="201.0" r="6.5" fill="#fcfcfb"/><circle cx="638.7" cy="201.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="641.7" y1="201.0" x2="645.1" y2="201.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="642.3" cy="201.0" r="6.5" fill="#fcfcfb"/><circle cx="642.3" cy="201.0" r="5" fill="#1baf7a"/>
+<text x="627.7" y="205.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">5.74×</text>
+<text x="653.3" y="205.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">5.85×</text>
+<rect x="250" y="218.0" width="740" height="34" fill="#00000006"/>
+<text x="236" y="239.0" text-anchor="end" font-size="12" fill="#1c1c1a">linear</text>
+<line x1="504.8" y1="235.0" x2="506.5" y2="235.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="491.7" y1="235.0" x2="506.2" y2="235.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="504.8" cy="235.0" r="6.5" fill="#fcfcfb"/><circle cx="504.8" cy="235.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="501.3" y1="235.0" x2="510.7" y2="235.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="506.5" cy="235.0" r="6.5" fill="#fcfcfb"/><circle cx="506.5" cy="235.0" r="5" fill="#1baf7a"/>
+<text x="493.8" y="239.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">2.76×</text>
+<text x="517.5" y="239.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">2.79×</text>
+<text x="236" y="273.0" text-anchor="end" font-size="12" fill="#1c1c1a">scatter_sum</text>
+<line x1="491.7" y1="269.0" x2="516.6" y2="269.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="487.8" y1="269.0" x2="495.2" y2="269.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="491.7" cy="269.0" r="6.5" fill="#fcfcfb"/><circle cx="491.7" cy="269.0" r="5" fill="#1baf7a"/>
+<line class="error-bar" x1="514.9" y1="269.0" x2="521.7" y2="269.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="516.6" cy="269.0" r="6.5" fill="#fcfcfb"/><circle cx="516.6" cy="269.0" r="5" fill="#eb6834"/>
+<text x="480.7" y="273.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">2.57×</text>
+<text x="527.6" y="273.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">2.95×</text>
+<rect x="250" y="286.0" width="740" height="34" fill="#00000006"/>
+<text x="236" y="307.0" text-anchor="end" font-size="12" fill="#1c1c1a">spherical_harmonics</text>
+<line x1="388.8" y1="303.0" x2="912.2" y2="303.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="380.0" y1="303.0" x2="389.9" y2="303.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="388.8" cy="303.0" r="6.5" fill="#fcfcfb"/><circle cx="388.8" cy="303.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="908.3" y1="303.0" x2="921.8" y2="303.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="912.2" cy="303.0" r="6.5" fill="#fcfcfb"/><circle cx="912.2" cy="303.0" r="5" fill="#1baf7a"/>
+<text x="377.8" y="307.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">1.47×</text>
+<text x="923.2" y="307.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">25.45×</text>
+<text x="236" y="341.0" text-anchor="end" font-size="12" fill="#1c1c1a">v2106_attributed_network</text>
+<line x1="598.1" y1="337.0" x2="742.6" y2="337.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="597.2" y1="337.0" x2="607.9" y2="337.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="598.1" cy="337.0" r="6.5" fill="#fcfcfb"/><circle cx="598.1" cy="337.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="742.0" y1="337.0" x2="742.7" y2="337.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="742.6" cy="337.0" r="6.5" fill="#fcfcfb"/><circle cx="742.6" cy="337.0" r="5" fill="#1baf7a"/>
+<text x="587.1" y="341.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">4.60×</text>
+<text x="753.6" y="341.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">10.10×</text>
+<rect x="250" y="354.0" width="740" height="34" fill="#00000006"/>
+<text x="236" y="375.0" text-anchor="end" font-size="12" fill="#1c1c1a">v2106_simple_network</text>
+<line x1="569.5" y1="371.0" x2="705.7" y2="371.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="568.4" y1="371.0" x2="576.0" y2="371.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="569.5" cy="371.0" r="6.5" fill="#fcfcfb"/><circle cx="569.5" cy="371.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="702.4" y1="371.0" x2="706.1" y2="371.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="705.7" cy="371.0" r="6.5" fill="#fcfcfb"/><circle cx="705.7" cy="371.0" r="5" fill="#1baf7a"/>
+<text x="558.5" y="375.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">3.93×</text>
+<text x="716.7" y="375.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">8.26×</text>
+<text x="236" y="409.0" text-anchor="end" font-size="12" fill="#1c1c1a">weighted_tensor_product_uvu</text>
+<line x1="541.6" y1="405.0" x2="729.7" y2="405.0" stroke="#e6e5e1" stroke-width="3" stroke-linecap="round"/>
+<line class="error-bar" x1="540.4" y1="405.0" x2="546.9" y2="405.0" stroke="#eb6834" stroke-width="1" opacity="0.55"/>
+<circle cx="541.6" cy="405.0" r="6.5" fill="#fcfcfb"/><circle cx="541.6" cy="405.0" r="5" fill="#eb6834"/>
+<line class="error-bar" x1="727.1" y1="405.0" x2="730.3" y2="405.0" stroke="#1baf7a" stroke-width="1" opacity="0.55"/>
+<circle cx="729.7" cy="405.0" r="6.5" fill="#fcfcfb"/><circle cx="729.7" cy="405.0" r="5" fill="#1baf7a"/>
+<text x="530.6" y="409.0" text-anchor="end" font-size="11" fill="#6b6a65" font-variant-numeric="tabular-nums">3.38×</text>
+<text x="740.7" y="409.0" font-size="11" fill="#1c1c1a" font-variant-numeric="tabular-nums">9.42×</text>
+<text x="34" y="480" font-size="11" fill="#6b6a65">Log scale. Dots are medians of n=5 independent runs; the faint bar through a dot is the between-run IQR.</text>
+</svg>
