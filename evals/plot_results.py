@@ -7,6 +7,7 @@ import argparse
 import csv
 from html import escape
 import json
+import math
 from pathlib import Path
 import statistics
 import sys
@@ -19,13 +20,22 @@ from evals.common import load_documents, summarize
 
 
 BACKENDS = ("torch-cpu", "mlx", "mlx-kernel")
+# Categorical slots 1-3 of the validated reference palette, in fixed backend
+# order (never cycled). All-pairs CVD dE 9.2 (deutan) on the light surface; the
+# amber/green pairing this replaces sat at 7.9, inside the floor band.
 COLORS = {
-    "torch-cpu": "#d97706",
-    "mlx": "#2563eb",
-    "mlx-kernel": "#059669",
-    "speedup": "#059669",
-    "slowdown": "#dc2626",
+    "torch-cpu": "#2a78d6",
+    "mlx": "#eb6834",
+    "mlx-kernel": "#1baf7a",
+    # Diverging poles about parity. blue<->red is dE 23.8 (protan); the previous
+    # green/red was 8.6 -- the pairing protanopes confuse most.
+    "speedup": "#2a78d6",
+    "slowdown": "#d03b3b",
 }
+INK = "#1c1c1a"
+INK_MUTED = "#6b6a65"
+SURFACE = "#fcfcfb"
+GRID = "#e6e5e1"
 
 
 class BarEntry(NamedTuple):
@@ -126,79 +136,185 @@ def speedup_entries(rows, phase: str):
     return entries
 
 
-def horizontal_bars(
+def group_by_case(entries: list[BarEntry]) -> list[tuple[str, list[BarEntry]]]:
+    """Collapse "case . series" rows into one row per case."""
+
+    grouped: dict[str, list[BarEntry]] = {}
+    for entry in entries:
+        case = entry.label.split(" \u00b7 ")[0]
+        grouped.setdefault(case, []).append(entry)
+    return sorted(grouped.items())
+
+
+def _log_ticks(low: float, high: float) -> list[float]:
+    """Decade ticks, refined with 2/5 steps when the span is narrow."""
+
+    ticks = []
+    decade = math.floor(math.log10(low))
+    while 10.0**decade <= high * 1.0000001:
+        for step in (1.0, 2.0, 5.0):
+            value = step * 10.0**decade
+            if low <= value <= high:
+                ticks.append(value)
+        decade += 1
+    return ticks or [low, high]
+
+
+def _fmt(value: float, unit: str) -> str:
+    if unit == "x":
+        return f"{value:.2f}\u00d7"
+    if value >= 100:
+        return f"{value:.0f}"
+    if value >= 10:
+        return f"{value:.1f}"
+    return f"{value:.2f}"
+
+
+def dot_plot(
     path: Path,
     *,
     title: str,
     subtitle: str,
-    entries: list[BarEntry],
+    groups: list[tuple[str, list[BarEntry]]],
     unit: str,
+    series: list[tuple[str, str]],
     reference: float | None = None,
+    label_dots: bool = False,
 ) -> None:
-    width = 1280
-    left = 510
-    right = 300
-    top = 100
-    row_height = 31
-    height = max(220, top + row_height * max(1, len(entries)) + 70)
+    """One row per case, one dot per backend, on a log value axis.
+
+    A dot plot rather than bars: these values span three orders of magnitude,
+    and a bar has to start at zero to be honest, which a log axis cannot do.
+    Position encoding carries the comparison instead, and each row becomes a
+    single readable range rather than three separate bars.
+    """
+
+    left, right, top = 250, 190, 116
+    row_height = 34
+    width = 1180
+    height = top + row_height * max(1, len(groups)) + 74
     plot_width = width - left - right
-    maximum = max((entry.upper for entry in entries), default=1.0)
+
+    values = [e.value for _, entries in groups for e in entries]
+    values += [e.lower for _, entries in groups for e in entries if e.lower > 0]
+    values += [e.upper for _, entries in groups for e in entries if e.upper > 0]
+    values = [v for v in values if v > 0] or [1.0]
+    low, high = min(values), max(values)
     if reference is not None:
-        maximum = max(maximum, reference)
-    maximum = maximum * 1.08 if maximum > 0 else 1.0
-    elements = [
+        # Keep parity on the axis, but do not force symmetry about it: these
+        # ratios sit almost entirely on one side, and a symmetric span would
+        # spend half the width on an empty region.
+        low, high = min(low, reference), max(high, reference)
+    low, high = low / 1.45, high * 1.45
+    log_low, log_high = math.log10(low), math.log10(high)
+
+    def x_of(value: float) -> float:
+        value = max(value, low)
+        return left + plot_width * (math.log10(value) - log_low) / (log_high - log_low)
+
+    out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-        f'viewBox="0 0 {width} {height}">',
-        '<rect width="100%" height="100%" fill="#fbfbfd"/>',
-        f'<text x="35" y="38" font-family="system-ui" font-size="24" '
-        f'font-weight="700" fill="#202124">{escape(title)}</text>',
-        f'<text x="35" y="66" font-family="system-ui" font-size="14" '
-        f'fill="#5f6368">{escape(subtitle)}</text>',
+        f'viewBox="0 0 {width} {height}" font-family="system-ui, -apple-system, sans-serif">',
+        f'<rect width="100%" height="100%" fill="{SURFACE}"/>',
+        f'<text x="34" y="40" font-size="21" font-weight="600" fill="{INK}">{escape(title)}</text>',
+        f'<text x="34" y="63" font-size="13" fill="{INK_MUTED}">{escape(subtitle)}</text>',
     ]
+
+    # Legend: identity is never colour-alone, so every series is named here.
+    # Only categories actually present are listed -- a legend entry with no
+    # members on the chart is noise, and on the speedup plot it would advertise
+    # a "slower" class that no case falls into.
+    present = {entry.color_key for _, entries in groups for entry in entries}
+    lx = 34
+    for key, name in [item for item in series if item[0] in present]:
+        out.append(f'<circle cx="{lx + 5}" cy="84" r="5" fill="{COLORS[key]}"/>')
+        out.append(
+            f'<text x="{lx + 16}" y="88" font-size="12" fill="{INK_MUTED}">{escape(name)}</text>'
+        )
+        lx += 30 + 7.6 * len(name)
+
+    plot_bottom = top + row_height * len(groups)
+
+    # Hairline grid, one shade off the surface, solid (never dashed).
+    for tick in _log_ticks(low, high):
+        x = x_of(tick)
+        out.append(
+            f'<line x1="{x:.1f}" y1="{top - 10}" x2="{x:.1f}" y2="{plot_bottom + 6}" '
+            f'stroke="{GRID}" stroke-width="1"/>'
+        )
+        out.append(
+            f'<text x="{x:.1f}" y="{plot_bottom + 24}" text-anchor="middle" font-size="11" '
+            f'fill="{INK_MUTED}" font-variant-numeric="tabular-nums">{_fmt(tick, unit)}</text>'
+        )
+
     if reference is not None:
-        x = left + plot_width * reference / maximum
-        elements.extend(
-            [
-                f'<line x1="{x:.2f}" y1="{top - 12}" x2="{x:.2f}" '
-                f'y2="{height - 48}" stroke="#6b7280" stroke-dasharray="4 4"/>',
-                f'<text x="{x + 5:.2f}" y="{top - 17}" font-family="system-ui" '
-                'font-size="12" fill="#5f6368">parity</text>',
-            ]
+        x = x_of(reference)
+        out.append(
+            f'<line x1="{x:.1f}" y1="{top - 14}" x2="{x:.1f}" y2="{plot_bottom + 6}" '
+            f'stroke="{INK_MUTED}" stroke-width="1"/>'
         )
-    for index, entry in enumerate(entries):
-        label, value, color_key = entry[:3]
-        y = top + index * row_height
-        bar_width = plot_width * value / maximum
-        lower_x = left + plot_width * entry.lower / maximum
-        upper_x = left + plot_width * entry.upper / maximum
-        formatted = (
-            f"{value:.3f} {unit}"
-            if unit == "ms"
-            else f"{value:.2f}×"
+        out.append(
+            f'<text x="{x:.1f}" y="{top - 20}" text-anchor="middle" font-size="11" '
+            f'fill="{INK_MUTED}">parity</text>'
         )
-        if entry.repeat_count > 1:
-            formatted += f" (IQR {entry.lower:.3f}–{entry.upper:.3f}, n={entry.repeat_count})"
-        elements.extend(
-            [
-                f'<text x="{left - 12}" y="{y + 18}" text-anchor="end" '
-                f'font-family="ui-monospace, monospace" font-size="11" '
-                f'fill="#303238">{escape(label)}</text>',
-                f'<rect x="{left}" y="{y + 4}" width="{bar_width:.2f}" '
-                f'height="20" rx="3" fill="{COLORS[color_key]}"/>',
-                f'<line class="error-bar" x1="{lower_x:.2f}" y1="{y + 14}" '
-                f'x2="{upper_x:.2f}" y2="{y + 14}" stroke="#111827" '
-                'stroke-width="2"/>',
-                f'<line class="error-bar" x1="{lower_x:.2f}" y1="{y + 9}" '
-                f'x2="{lower_x:.2f}" y2="{y + 19}" stroke="#111827"/>',
-                f'<line class="error-bar" x1="{upper_x:.2f}" y1="{y + 9}" '
-                f'x2="{upper_x:.2f}" y2="{y + 19}" stroke="#111827"/>',
-                f'<text x="{left + bar_width + 7:.2f}" y="{y + 19}" '
-                f'font-family="system-ui" font-size="12" fill="#303238">'
-                f'{formatted}</text>',
-            ]
+
+    for index, (case, entries) in enumerate(groups):
+        cy = top + index * row_height + row_height / 2
+        if index % 2 == 1:
+            out.append(
+                f'<rect x="{left}" y="{cy - row_height / 2:.1f}" width="{plot_width}" '
+                f'height="{row_height}" fill="#00000006"/>'
+            )
+        out.append(
+            f'<text x="{left - 14}" y="{cy + 4:.1f}" text-anchor="end" font-size="12" '
+            f'fill="{INK}">{escape(case)}</text>'
         )
-    elements.append("</svg>")
-    path.write_text("\n".join(elements) + "\n")
+        positioned = sorted(entries, key=lambda e: e.value)
+        if len(positioned) > 1:
+            out.append(
+                f'<line x1="{x_of(positioned[0].value):.1f}" y1="{cy:.1f}" '
+                f'x2="{x_of(positioned[-1].value):.1f}" y2="{cy:.1f}" '
+                f'stroke="{GRID}" stroke-width="3" stroke-linecap="round"/>'
+            )
+        for entry in positioned:
+            x = x_of(entry.value)
+            if entry.repeat_count > 1 and entry.upper > entry.lower:
+                out.append(
+                    f'<line class="error-bar" x1="{x_of(entry.lower):.1f}" y1="{cy:.1f}" '
+                    f'x2="{x_of(entry.upper):.1f}" y2="{cy:.1f}" '
+                    f'stroke="{COLORS[entry.color_key]}" stroke-width="1" opacity="0.55"/>'
+                )
+            # 2px surface ring so overlapping dots stay separable.
+            out.append(
+                f'<circle cx="{x:.1f}" cy="{cy:.1f}" r="6.5" fill="{SURFACE}"/>'
+                f'<circle cx="{x:.1f}" cy="{cy:.1f}" r="5" fill="{COLORS[entry.color_key]}"/>'
+            )
+        if label_dots:
+            # Only the row's extremes are labelled, and only on the outside, so
+            # the numbers never collide with a dot or with each other.
+            lo, hi = positioned[0], positioned[-1]
+            out.append(
+                f'<text x="{x_of(lo.value) - 11:.1f}" y="{cy + 4:.1f}" text-anchor="end" '
+                f'font-size="11" fill="{INK_MUTED}" font-variant-numeric="tabular-nums">'
+                f'{_fmt(lo.value, unit)}</text>'
+            )
+            if hi is not lo:
+                out.append(
+                    f'<text x="{x_of(hi.value) + 11:.1f}" y="{cy + 4:.1f}" font-size="11" '
+                    f'fill="{INK}" font-variant-numeric="tabular-nums">'
+                    f'{_fmt(hi.value, unit)}</text>'
+                )
+
+    repeats = max(
+        (entry.repeat_count for _, entries in groups for entry in entries), default=1
+    )
+    runs = f"n={repeats} independent runs" if repeats > 1 else "a single run"
+    out.append(
+        f'<text x="34" y="{height - 16}" font-size="11" fill="{INK_MUTED}">'
+        f'{escape(f"Log scale. Dots are medians of {runs}; the faint bar through a dot is the between-run IQR.")}</text>'
+    )
+    out.append("</svg>")
+    path.write_text("\n".join(out) + "\n")
 
 
 def aggregate_rows(rows, *, expected_repeats: int | None = None):
@@ -341,19 +457,30 @@ def write_html(path: Path, rows, generated: list[str]) -> None:
             "</tr>"
         )
     images = "\n".join(
-        f'<section><img src="{escape(name)}" alt="{escape(name)}"></section>'
+        f'<figure><img src="{escape(name)}" alt="{escape(name)}"></figure>'
         for name in generated
     )
     path.write_text(
         """<!doctype html>
 <html><head><meta charset="utf-8"><title>e3nn benchmark</title>
 <style>
-body{font-family:system-ui;margin:2rem;color:#202124}
-img{max-width:100%;border:1px solid #e5e7eb;margin-bottom:1rem}
-table{border-collapse:collapse;width:100%}
-th,td{border:1px solid #d1d5db;padding:.45rem;text-align:left}
-th{background:#f3f4f6}
+:root{color-scheme:light}
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:2.5rem 1.5rem;
+  color:#1c1c1a;background:#fcfcfb;line-height:1.5}
+main{max-width:1180px;margin:0 auto}
+h1{font-size:1.6rem;font-weight:600;margin:0 0 .4rem}
+h2{font-size:1.05rem;font-weight:600;margin:2.5rem 0 .75rem}
+p{color:#6b6a65;max-width:64ch;margin:0 0 1.5rem}
+figure{margin:0 0 1.75rem}
+img{max-width:100%;display:block;border:1px solid #e6e5e1;border-radius:2px}
+table{border-collapse:collapse;width:100%;font-size:.82rem;
+  font-variant-numeric:tabular-nums}
+th,td{border-bottom:1px solid #e6e5e1;padding:.4rem .6rem;text-align:left}
+th{font-weight:600;color:#6b6a65;border-bottom-width:2px;white-space:nowrap}
+tbody tr:hover{background:#00000005}
+code{font-family:ui-monospace,monospace;font-size:.9em}
 </style></head><body>
+<main>
 <h1>Three-way e3nn performance comparison</h1>
 <p>Torch CPU uses all available CPU threads. Both MLX workers use compiled
 execution; only <code>mlx-kernel</code> enables generated kernels.</p>
@@ -367,7 +494,7 @@ execution; only <code>mlx-kernel</code> enables generated kernels.</p>
 <th>Status</th></tr></thead><tbody>
 """
         + "\n".join(table_rows)
-        + "</tbody></table></body></html>\n"
+        + "</tbody></table></main></body></html>\n"
     )
 
 
@@ -396,28 +523,35 @@ def main(argv=None) -> int:
     generated = []
     for phase in ("forward", "train"):
         latency_name = f"latency_{phase}.svg"
-        horizontal_bars(
+        dot_plot(
             args.output_dir / latency_name,
             title=f"{phase.title()} steady-state latency",
-            subtitle=(
-                "Lower is better; bars are medians of independent runs "
-                "and whiskers show the between-run IQR."
-            ),
-            entries=latency_entries(rows, phase),
+            subtitle="Milliseconds per call, lower is better. One row per case.",
+            groups=group_by_case(latency_entries(rows, phase)),
             unit="ms",
+            series=[
+                ("torch-cpu", "Torch CPU"),
+                ("mlx", "MLX"),
+                ("mlx-kernel", "MLX + kernels"),
+            ],
         )
         generated.append(latency_name)
         speedup_name = f"speedup_{phase}.svg"
-        horizontal_bars(
+        dot_plot(
             args.output_dir / speedup_name,
             title=f"{phase.title()} speedup over Torch CPU",
             subtitle=(
-                "Paired by repeat; bars are median speedups and whiskers "
-                "show the between-run IQR."
+                "Torch CPU median divided by MLX median, paired by repeat. "
+                "Right of parity is faster."
             ),
-            entries=speedup_entries(rows, phase),
+            groups=group_by_case(speedup_entries(rows, phase)),
             unit="x",
+            series=[
+                ("speedup", "Faster than Torch CPU"),
+                ("slowdown", "Slower"),
+            ],
             reference=1.0,
+            label_dots=True,
         )
         generated.append(speedup_name)
     write_csv(args.output_dir / "summary.csv", aggregated)
