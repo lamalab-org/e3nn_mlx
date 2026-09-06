@@ -21,11 +21,16 @@ degree $l=5$. The surfaces are evaluated by
 torch-compatible basis into the legacy display convention used by the
 [original e3nn animation](https://e3nn.org/assets/img/sphharm.gif). 
 
-This animation an be rebuild with 
+This animation can be rebuilt with
+
 ```bash
 .venv/bin/python tutorials/spherical_harmonics_animation.py \
-
+    --output docs/_static/sphharm_mlx.gif --transparent
 ```
+
+`--transparent` leaves the page showing through instead of painting the
+figure white, so the animation reads correctly on both light and dark
+documentation themes. Drop the flag for a white background.
 
 
 ## Where to start
