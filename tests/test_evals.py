@@ -161,8 +161,10 @@ def test_result_round_trip_speedups_and_compact_plots(tmp_path) -> None:
     }
     assert "5.00×" in (output / "speedup_forward.svg").read_text()
     latency = (output / "latency_forward.svg").read_text()
-    assert "torch-cpu" in latency
-    assert "mlx-kernel" in latency
+    # Backends are identified in the legend by display name; the raw ids stay in
+    # the table and summary.csv.
+    assert "Torch CPU" in latency
+    assert "MLX + kernels" in latency
     report = (output / "report.html").read_text()
     assert "Selected path" in report
     assert "general-mlx" in report

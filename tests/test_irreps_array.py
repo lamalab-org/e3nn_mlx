@@ -39,5 +39,5 @@ def test_irreps_array_regroup_reorders_data_with_metadata() -> None:
         mlx_backend.asarray([[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]),
     )
     regrouped = irreps_array.regroup()
-    assert str(regrouped.irreps) == "0e+3x1o"
+    assert str(regrouped.irreps) == "1x0e+3x1o"
     assert regrouped.array.tolist() == [[4.0, 1.0, 2.0, 3.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0]]

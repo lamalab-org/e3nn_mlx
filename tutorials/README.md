@@ -1,5 +1,14 @@
 # Tutorial compatibility helpers
 
+
+## Requirements
+
+The notebooks need extras that the base package does not install:
+
+```bash
+python -m pip install -e '.[tutorials]'
+```
+
 ## Where these tutorials come from
 
 - `data_types.ipynb` and `operations_on_spherical_tensors.ipynb` adapt

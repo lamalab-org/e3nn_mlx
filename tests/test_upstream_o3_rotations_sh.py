@@ -176,7 +176,12 @@ def test_upstream_spherical_harmonics_recurrence_and_jacobian(degree: int) -> No
         axis=0,
     )
     expected = (degree + 1) / alpha * mx.einsum("ijk,j->ik", coefficient, lower)
-    assert _max_abs(jacobian - expected) < (2e-2 if degree >= 7 else 2e-3)
+    # normalize=False makes these scale as |vector| ** (degree + 1), so a fixed
+    # absolute bound is really a draw-dependent one: the same correct result
+    # measured 2.4e-7 for a short vector and 3.8e-1 for a long one. The relative
+    # error is flat at a few float32 ulps across every degree, so bound that.
+    scale = max(float(mx.max(mx.abs(expected))), 1.0)
+    assert _max_abs(jacobian - expected) < 5e-6 * scale
 
 
 @pytest.mark.mlx

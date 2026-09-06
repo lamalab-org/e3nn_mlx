@@ -2,28 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import functools
 from math import sqrt
-
-from .irreps import Irrep
-
-
-@dataclass(frozen=True, slots=True)
-class Wigner3jKey:
-    l1: int
-    l2: int
-    l3: int
-
-
-@dataclass(frozen=True, slots=True)
-class WignerDKey:
-    l: int
-    convention: str = "zyz"
-
-    @property
-    def irrep(self) -> Irrep:
-        return Irrep(self.l, 1)
 
 
 @functools.lru_cache(maxsize=None)
@@ -77,14 +57,21 @@ def so3_generators(l: int) -> tuple[tuple[tuple[float, ...], ...], ...]:
     q = change_basis_real_to_complex(l)
     x = su2_generators(l)
     dim = 2 * l + 1
+    # conj(q.T), so that adjoint[row][left] == q[left][row].conjugate()
+    adjoint = [[q[left][row].conjugate() for left in range(dim)] for row in range(dim)]
     out = [[[0.0 for _ in range(dim)] for _ in range(dim)] for _ in range(3)]
     for axis in range(3):
+        axis_generator = x[axis]
+        # Evaluate conj(q.T) @ x @ q as two matrix products rather than one
+        # quadruple loop: O(dim ** 3) instead of O(dim ** 4).
+        partial = [
+            [sum(row[left] * axis_generator[left][column] for left in range(dim)) for column in range(dim)]
+            for row in adjoint
+        ]
         for row in range(dim):
+            partial_row = partial[row]
             for column in range(dim):
-                value = 0j
-                for left in range(dim):
-                    for right in range(dim):
-                        value += q[left][row].conjugate() * x[axis][left][right] * q[right][column]
+                value = sum(partial_row[right] * q[right][column] for right in range(dim))
                 if abs(value.imag) > 1e-10:
                     raise ArithmeticError("real-basis generator has a non-negligible imaginary component")
                 out[axis][row][column] = value.real

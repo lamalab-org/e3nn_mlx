@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import re
 from typing import Callable, Iterable, Iterator
 
+from .runtime import get_runtime
 from .typing import Parity
 
 _IRREP_RE = re.compile(r"^(?:(?P<mul>\d+)x)?(?P<l>\d+)(?P<parity>[eoy])$")
@@ -104,14 +105,32 @@ class Irrep:
     def __iter__(self):
         return iter((self.l, self.p))
 
+    def D_from_angles(self, alpha, beta, gamma, k=0):
+        """Wigner-D matrix of this irrep for YXY Euler angles (requires a runtime)."""
+
+        return get_runtime("irrep_D_from_angles")(self, alpha, beta, gamma, k=k)
+
+    def D_from_matrix(self, matrix):
+        """Wigner-D matrix from a 3x3 rotation matrix, honouring improper rotations."""
+
+        return get_runtime("irrep_D_from_matrix")(self, matrix)
+
+    def D_from_quaternion(self, quaternion, k=0):
+        return get_runtime("irrep_D_from_quaternion")(self, quaternion, k=k)
+
+    def D_from_axis_angle(self, axis, angle):
+        return get_runtime("irrep_D_from_axis_angle")(self, axis, angle)
+
     @staticmethod
     def iterator(lmax: int | None = None) -> Iterator[Irrep]:
         if lmax is not None and lmax < 0:
             raise ValueError("lmax must be non-negative")
         l = 0
         while lmax is None or l <= lmax:
-            yield Irrep(l, 1)
-            yield Irrep(l, -1)
+            # Upstream yields the natural parity of l first: 0e, 0o, 1o, 1e, 2e, 2o, ...
+            natural = (-1) ** l
+            yield Irrep(l, natural)
+            yield Irrep(l, -natural)
             l += 1
 
 
@@ -127,6 +146,17 @@ class MulIrrep:
     @property
     def dim(self) -> int:
         return self.mul * self.ir.dim
+
+    def __iter__(self) -> Iterator[int | Irrep]:
+        """Support upstream's ``mul, ir = mul_irrep`` unpacking."""
+
+        return iter((self.mul, self.ir))
+
+    def __len__(self) -> int:
+        return 2
+
+    def __getitem__(self, item: int) -> int | Irrep:
+        return (self.mul, self.ir)[item]
 
     @classmethod
     def parse(cls, spec: str | Irrep | MulIrrep | tuple[int, Irrep | str]) -> MulIrrep:
@@ -146,8 +176,7 @@ class MulIrrep:
         return cls(mul=mul, ir=Irrep(l, _parse_parity_token(match.group("parity"), l)))
 
     def __str__(self) -> str:
-        if self.mul == 1:
-            return str(self.ir)
+        # Upstream always prints the multiplicity, including "1x".
         return f"{self.mul}x{self.ir}"
 
 
@@ -192,7 +221,8 @@ class Irreps:
     def lmax(self) -> int:
         nonzero = [part.ir.l for part in self.parts if part.mul > 0]
         if not nonzero:
-            return -1
+            # Upstream raises here rather than reporting a sentinel degree.
+            raise ValueError("Cannot get lmax of empty Irreps")
         return max(nonzero)
 
     @property
@@ -307,6 +337,36 @@ class Irreps:
 
     def __rmul__(self, multiplicity: int) -> Irreps:
         return self * multiplicity
+
+    def index(self, part: MulIrrep | Irrep | str | tuple[int, Irrep | str]) -> int:
+        """Return the position of ``part``, like upstream's tuple-derived index."""
+
+        target = MulIrrep.parse(part)
+        for position, candidate in enumerate(self.parts):
+            if candidate == target:
+                return position
+        raise ValueError(f"{part!r} is not in {self}")
+
+    def D_from_angles(self, alpha, beta, gamma, k=0):
+        """Block-diagonal Wigner-D matrix for YXY Euler angles (requires a runtime)."""
+
+        return get_runtime("irreps_D_from_angles")(self, alpha, beta, gamma, k=k)
+
+    def D_from_matrix(self, matrix):
+        """Block-diagonal Wigner-D from a 3x3 matrix, honouring improper rotations."""
+
+        return get_runtime("irreps_D_from_matrix")(self, matrix)
+
+    def D_from_quaternion(self, quaternion, k=0):
+        return get_runtime("irreps_D_from_quaternion")(self, quaternion, k=k)
+
+    def D_from_axis_angle(self, axis, angle):
+        return get_runtime("irreps_D_from_axis_angle")(self, axis, angle)
+
+    def randn(self, *shape, normalization: str = "component", dtype=None):
+        """Random array whose ``-1`` axis carries this representation."""
+
+        return get_runtime("irreps_randn")(self, *shape, normalization=normalization, dtype=dtype)
 
     @property
     def slice_by_mul(self) -> _MulIndexSlice:

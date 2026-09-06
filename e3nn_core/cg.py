@@ -29,30 +29,49 @@ def _f(value: int | float) -> int:
     return factorial(rounded)
 
 
+def _magnetic_numbers(j: float) -> tuple[float, ...]:
+    """Return -j, -j+1, ..., j, exact for integer and half-integer j alike."""
+
+    doubled = round(2 * j)
+    if doubled % 2 == 0:
+        # Integer j: keep exact ints so the integer path is unchanged.
+        whole = doubled // 2
+        return tuple(range(-whole, whole + 1))
+    return tuple(half / 2 for half in range(-doubled, doubled + 1, 2))
+
+
 @functools.lru_cache(maxsize=None)
-def su2_clebsch_gordan(l1: int, l2: int, l3: int) -> tuple[tuple[tuple[float, ...], ...], ...]:
-    dim1 = 2 * l1 + 1
-    dim2 = 2 * l2 + 1
-    dim3 = 2 * l3 + 1
-    if l3 not in range(abs(l1 - l2), l1 + l2 + 1):
+def su2_clebsch_gordan(l1: int | float, l2: int | float, l3: int | float) -> tuple[tuple[tuple[float, ...], ...], ...]:
+    for j in (l1, l2, l3):
+        if not isinstance(j, (int, float)) or j < 0 or not float(2 * j).is_integer():
+            raise ValueError("angular momenta must be non-negative integers or half-integers")
+    dim1 = round(2 * l1) + 1
+    dim2 = round(2 * l2) + 1
+    dim3 = round(2 * l3) + 1
+    # Triangle rule in doubled units, so half-integer couplings are handled too.
+    if round(2 * l3) not in range(round(2 * abs(l1 - l2)), round(2 * (l1 + l2)) + 1, 2):
         return tuple(tuple(tuple(0.0 for _ in range(dim3)) for _ in range(dim2)) for _ in range(dim1))
     mat = [[[0.0 for _ in range(dim3)] for _ in range(dim2)] for _ in range(dim1)]
-    for m1 in range(-l1, l1 + 1):
-        for m2 in range(-l2, l2 + 1):
+    for m1 in _magnetic_numbers(l1):
+        for m2 in _magnetic_numbers(l2):
             m3 = m1 + m2
             if abs(m3) <= l3:
-                mat[l1 + m1][l2 + m2][l3 + m3] = _su2_clebsch_gordan_coeff((l1, m1), (l2, m2), (l3, m3))
+                mat[round(l1 + m1)][round(l2 + m2)][round(l3 + m3)] = _su2_clebsch_gordan_coeff(
+                    (l1, m1), (l2, m2), (l3, m3)
+                )
     return tuple(tuple(tuple(values) for values in row) for row in mat)
 
 
-def _su2_clebsch_gordan_coeff(idx1: tuple[int, int], idx2: tuple[int, int], idx3: tuple[int, int]) -> float:
+def _su2_clebsch_gordan_coeff(
+    idx1: tuple[float, float], idx2: tuple[float, float], idx3: tuple[float, float]
+) -> float:
     j1, m1 = idx1
     j2, m2 = idx2
     j3, m3 = idx3
     if m3 != m1 + m2:
         return 0.0
-    vmin = max(-j1 + j2 + m3, -j1 + m1, 0)
-    vmax = min(j2 + j3 + m1, j3 - j1 + j2, j3 + m3)
+    vmin = round(max(-j1 + j2 + m3, -j1 + m1, 0))
+    vmax = round(min(j2 + j3 + m1, j3 - j1 + j2, j3 + m3))
 
     c = (
         (2.0 * j3 + 1.0)
@@ -63,7 +82,7 @@ def _su2_clebsch_gordan_coeff(idx1: tuple[int, int], idx2: tuple[int, int], idx3
     ) ** 0.5
     acc = Fraction(0, 1)
     for v in range(vmin, vmax + 1):
-        acc += ((-1) ** (v + j2 + m2)) * Fraction(
+        acc += ((-1) ** round(v + j2 + m2)) * Fraction(
             _f(j2 + j3 + m1 - v) * _f(j1 - m1 + v),
             _f(v) * _f(j3 - j1 + j2 - v) * _f(j3 + m3 - v) * _f(v + j1 - j2 - m3),
         )
@@ -73,6 +92,12 @@ def _su2_clebsch_gordan_coeff(idx1: tuple[int, int], idx2: tuple[int, int], idx3
 @functools.lru_cache(maxsize=None)
 def clebsch_gordan(ir_in1: Irrep | str, ir_in2: Irrep | str, ir_out: Irrep | str) -> tuple[tuple[tuple[float, ...], ...], ...]:
     key = ClebschGordanKey.from_irreps(ir_in1, ir_in2, ir_out)
+    # These arguments carry a parity, unlike wigner_3j's bare degrees, so an
+    # O(3)-forbidden coupling is a caller error rather than a zero block.
+    if key.ir_in1.p * key.ir_in2.p != key.ir_out.p:
+        raise ValueError(
+            f"parity mismatch: {key.ir_in1} x {key.ir_in2} cannot couple to {key.ir_out}"
+        )
     return _so3_clebsch_gordan(key.ir_in1.l, key.ir_in2.l, key.ir_out.l)
 
 

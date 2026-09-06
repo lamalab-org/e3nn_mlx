@@ -174,13 +174,24 @@ def test_spherical_tensor_full_product_preserves_tutorial_slice_order() -> None:
 
     product = SphericalTensor(signal_1, 1) @ SphericalTensor(signal_2, 1)
 
-    assert product.Rs == [(2, 0, 0), (3, 1, 0), (1, 2, 0)]
+    # Each copy reports its own parity: 1o x 1o couples to even parity at every
+    # degree, so the populated l=1 copy is the 1e pseudovector (the cross
+    # product), listed before the two empty 1o copies carried by 0e x 1o.
+    assert product.Rs == [(2, 0, 1), (1, 1, 1), (2, 1, -1), (1, 2, 1)]
     assert isinstance(product, IrrepsArray)
     assert product.shape == (16,)
     assert _max_abs(product.array[:2]) < 1e-6
     assert _max_abs(product.array[2:5]) > 0.1
     assert _max_abs(product.array[5:11]) < 1e-6
     assert _max_abs(product.array[11:]) > 0.1
+
+    # The historical slice offsets must keep landing on the pseudovector block.
+    offsets = {}
+    start = 0
+    for part in product.irreps:
+        offsets[str(part.ir)] = (start, start + part.dim)
+        start += part.dim
+    assert offsets["1e"] == (2, 5)
 
 
 def test_spherical_tensor_legacy_axes_follow_tutorial_l1_order() -> None:

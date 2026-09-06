@@ -105,8 +105,8 @@ def test_gate_is_parameterless_mlx_module() -> None:
 def test_odd_gate_changes_output_parity_and_is_inversion_equivariant() -> None:
     mx, _ = require_mlx()
     gate = Gate("", "0o", "1o")
-    assert str(gate.irreps_in) == "0o+1o"
-    assert str(gate.irreps_out) == "1e"
+    assert str(gate.irreps_in) == "1x0o+1x1o"
+    assert str(gate.irreps_out) == "1x1e"
     array = IrrepsArray("0o+1o", mlx_backend.asarray([[0.7, 1.0, -2.0, 3.0]]))
     inverted_input = IrrepsArray(array.irreps, -array.array)
     output = gate(array)
@@ -137,7 +137,7 @@ def test_gate_uses_parity_specific_activations() -> None:
         mlx_backend.asarray([[1.0, 2.0, 3.0, 4.0, 1.0, 2.0, 3.0, -1.0, -2.0, -3.0]]),
     )
     output = gate(array)
-    assert str(output.irreps) == "0e+0o+1o+1e"
+    assert str(output.irreps) == "1x0e+1x0o+1x1o+1x1e"
     assert output.array.tolist() == [[2.0, 4.0, 9.0, 18.0, 27.0, -16.0, -32.0, -48.0]]
 
 

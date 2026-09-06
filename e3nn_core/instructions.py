@@ -203,7 +203,8 @@ def generate_tensor_product_instructions(
             divisor = 1
         else:
             raise ValueError(f"unsupported path normalization {instruction.normalization.path_normalization!r}")
-        coefficient = sqrt(alpha / divisor) if divisor > 0 else 0.0
+        # Upstream leaves alpha undivided when the divisor is zero rather than zeroing the path.
+        coefficient = sqrt(alpha / divisor) if divisor > 0 else sqrt(alpha)
         normalized.append(
             TensorProductInstruction(
                 input1_index=instruction.input1_index,
@@ -389,7 +390,8 @@ def make_tensor_product_instructions(
             raise ValueError(f"unsupported path normalization {instruction.normalization.path_normalization!r}")
 
         alpha *= out_var_list[instruction.output_index]
-        coefficient = sqrt(alpha * path_weight / divisor) if divisor > 0 else 0.0
+        # Upstream leaves alpha undivided when the divisor is zero rather than zeroing the path.
+        coefficient = sqrt(alpha * path_weight / divisor) if divisor > 0 else sqrt(alpha * path_weight)
         out.append(
             TensorProductInstruction(
                 input1_index=instruction.input1_index,

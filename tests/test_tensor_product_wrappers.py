@@ -19,7 +19,7 @@ def _max_abs_diff(actual, expected) -> float:
 
 def test_fully_connected_tensor_product_builds_weighted_paths() -> None:
     tp = FullyConnectedTensorProduct("1o", "1o", "0e + 1e + 2e", internal_weights=False)
-    assert str(tp.irreps_out) == "0e+1e+2e"
+    assert str(tp.irreps_out) == "1x0e+1x1e+1x2e"
     assert len(tp.instructions) == 3
     assert tp.weight_numel == 3
 
@@ -39,7 +39,7 @@ def test_full_tensor_product_regroups_public_output() -> None:
 
 def test_elementwise_tensor_product_builds_elementwise_paths() -> None:
     tp = ElementwiseTensorProduct("2x0e + 1o", "2x0e + 1o")
-    assert str(tp.irreps_out) == "2x0e+0e+1e+2e"
+    assert str(tp.irreps_out) == "2x0e+1x0e+1x1e+1x2e"
     assert [inst.mode for inst in tp.instructions] == ["uuu", "uuu", "uuu", "uuu"]
 
 
@@ -60,13 +60,13 @@ def test_tensor_square_propagates_custom_kernel_setting() -> None:
 
 def test_tensor_square_symbolic_fully_connected_mode() -> None:
     tp = TensorSquare("2x0e", "1x0e", internal_weights=False)
-    assert str(tp.irreps_out) == "0e"
+    assert str(tp.irreps_out) == "1x0e"
     assert {inst.mode for inst in tp.instructions} == {"u<vw", "uuw"}
 
 
 def test_tensor_square_symbolic_full_mode_regroups_public_output() -> None:
     tp = TensorSquare("5x1e + 2e")
-    assert str(tp.irreps_out) == "16x0e+15x1e+21x2e+5x3e+4e"
+    assert str(tp.irreps_out) == "16x0e+15x1e+21x2e+5x3e+1x4e"
     assert repr(tp) == "TensorSquare(5x1e+1x2e -> 16x0e+15x1e+21x2e+5x3e+1x4e | 58 paths | 0 weights)"
 
 

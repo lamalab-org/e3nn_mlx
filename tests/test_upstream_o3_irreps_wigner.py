@@ -53,7 +53,8 @@ def test_upstream_irreps_indexing_empty_errors_and_slice_by_mul() -> None:
     empty = o3.Irreps()
     assert empty == o3.Irreps("") == o3.Irreps([])
     assert len(empty) == empty.dim == empty.num_irreps == 0
-    assert empty.lmax == -1
+    with pytest.raises(ValueError, match="empty Irreps"):
+        empty.lmax
 
     irreps = o3.Irreps("16x1e + 3e + 2e + 5o")
     assert irreps[0].mul == 16 and irreps[0].ir == o3.Irrep("1e")
