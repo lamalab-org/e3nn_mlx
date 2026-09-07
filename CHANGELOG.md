@@ -5,6 +5,8 @@ follow [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## 0.1.1
+
 ### Added
 
 - Expose the array-returning methods upstream e3nn defines on `Irrep` and
