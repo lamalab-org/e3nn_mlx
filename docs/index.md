@@ -6,8 +6,8 @@ building blocks for Apple silicon. It keeps the familiar `e3nn.o3` and
 differentiation, and generated Metal kernels.
 
 ```{important}
-This project is an independent MLX port and is currently alpha software. It is
-not a drop-in binary replacement for PyTorch e3nn. Consult the
+This project is an independent MLX port and is currently beta software. It is
+not full drop-in binary replacement for PyTorch e3nn, although high-level compatibility api exists. Consult the
 [compatibility and numerical conventions](COMPATIBILITY.md) before depending on an operation
 that is not covered by the public API below.
 ```
