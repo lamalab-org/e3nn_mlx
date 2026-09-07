@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "e3nn": "0.6.0",
+  "torch": "2.14.0",
+  "numpy": "2.5.2",
+  "normalization": "integral",
+  "cases": [
+    {
+      "lmax": 2,
+      "mmax": 2,
+      "res_beta": 6,
+      "res_alpha": 7,
+      "num_coefficients": 9,
+      "num_m_modes": 5
+    },
+    {
+      "lmax": 4,
+      "mmax": 2,
+      "res_beta": 10,
+      "res_alpha": 5,
+      "num_coefficients": 25,
+      "num_m_modes": 9
+    },
+    {
+      "lmax": 6,
+      "mmax": 2,
+      "res_beta": 14,
+      "res_alpha": 5,
+      "num_coefficients": 49,
+      "num_m_modes": 13
+    }
+  ]
+}

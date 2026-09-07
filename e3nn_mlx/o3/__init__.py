@@ -68,6 +68,7 @@ from ..ops_sh import (
     SphericalHarmonics as _SphericalHarmonics,
     SphericalHarmonicsAlphaBeta as _SphericalHarmonicsAlphaBeta,
     spherical_harmonics,
+    spherical_harmonics_alpha,
     spherical_harmonics_alpha_beta,
 )
 from ..ops_so3 import SO3Grid
@@ -234,6 +235,7 @@ __all__ = [
     "s2_grid",
     "so3_generators",
     "spherical_harmonics",
+    "spherical_harmonics_alpha",
     "spherical_harmonics_alpha_beta",
     "su2_generators",
     "wigner_3j",

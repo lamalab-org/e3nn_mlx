@@ -73,5 +73,6 @@ with their transformation laws. The same operation accepts an
 guide/index
 examples/index
 api/index
+UMA_COMPATIBILITY
 development/index
 ```

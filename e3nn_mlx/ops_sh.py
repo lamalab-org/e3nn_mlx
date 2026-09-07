@@ -156,6 +156,30 @@ def sh(
     )
 
 
+def spherical_harmonics_alpha(l: int, alpha):
+    """Real Fourier basis along longitude, ordered ``m = -l .. l``.
+
+    Row ``m`` holds ``sqrt(2) sin(|m| alpha)`` for negative ``m``, ``1`` for
+    ``m = 0``, and ``sqrt(2) cos(m alpha)`` for positive ``m``. This is the
+    alpha factor of the real spherical harmonics, split out so an S2 grid can
+    be built from separate longitude and latitude factors.
+    """
+
+    if l < 0:
+        raise ValueError("l must be non-negative")
+
+    mx, _ = require_mlx()
+    alpha = mx.expand_dims(alpha, axis=-1)
+    if l == 0:
+        return mx.ones_like(alpha)
+
+    descending = mx.arange(l, 0, -1, dtype=alpha.dtype)
+    ascending = mx.arange(1, l + 1, dtype=alpha.dtype)
+    sin_part = sqrt(2.0) * mx.sin(alpha * descending)
+    cos_part = sqrt(2.0) * mx.cos(alpha * ascending)
+    return mx.concatenate([sin_part, mx.ones_like(alpha), cos_part], axis=-1)
+
+
 def spherical_harmonics_alpha_beta(degrees, alpha, beta, *, normalization: str = "integral"):
     """Evaluate spherical harmonics from polar angles in the e3nn YXY convention."""
 
