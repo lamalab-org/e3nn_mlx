@@ -17,14 +17,19 @@ from e3nn_mlx.irreps_array import IrrepsArray
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Documents named individually rather than globbed, so that deleting one is a
+# deliberate act: test_required_markdown_files_exist reports it directly
+# instead of letting an unrelated test fail on a missing path.
+REQUIRED_MARKDOWN = (
+    ROOT / "README.md",
+    ROOT / "CHANGELOG.md",
+    ROOT / "benchmarks" / "README.md",
+    ROOT / "tests" / "reference_generation" / "README.md",
+)
 DOCUMENTED_MARKDOWN = tuple(
     sorted(
         {
-            ROOT / "README.md",
-            ROOT / "PORTING_MAP.md",
-            ROOT / "CHANGELOG.md",
-            ROOT / "benchmarks" / "README.md",
-            ROOT / "tests" / "reference_generation" / "README.md",
+            *REQUIRED_MARKDOWN,
             *ROOT.joinpath("docs").rglob("*.md"),
             *ROOT.joinpath("evals").glob("*.md"),
         }
@@ -850,3 +855,17 @@ def test_p0_tensor_product_dtype_contract() -> None:
     right = IrrepsArray("1o", mx.ones((2, 3), dtype=mx.float16))
     with pytest.raises(TypeError, match="matching dtypes"):
         e3nn_mlx.tensor_product(left, right)
+
+
+def test_required_markdown_files_exist() -> None:
+    """A named document must be present, or removed from the list on purpose."""
+
+    missing = [
+        path.relative_to(ROOT).as_posix()
+        for path in REQUIRED_MARKDOWN
+        if not path.is_file()
+    ]
+    assert not missing, (
+        f"listed in REQUIRED_MARKDOWN but absent: {missing}. Delete the entry "
+        "if the document was removed intentionally."
+    )
