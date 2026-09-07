@@ -1,4 +1,4 @@
-# e3nn_mlx
+# e3nn-mlx
 
 Incremental refactor of e3nn into a backend-neutral core plus an MLX-native runtime.
 
