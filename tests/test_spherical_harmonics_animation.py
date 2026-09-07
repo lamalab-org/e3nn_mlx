@@ -88,7 +88,9 @@ def test_transparent_animation_has_a_transparent_background(tmp_path) -> None:
 
     # A GIF carries transparency as one reserved palette index, not an alpha
     # channel, so its presence is what makes the background see-through.
-    assert image.info.get("transparency") is not None
+    # Read it before seeking: Pillow rewrites .info for each frame.
+    transparent_index = image.info.get("transparency")
+    assert transparent_index is not None
     assert image.n_frames == 3
 
     # The grabbed buffer is twice the figure size on a HiDPI backend; frames are
@@ -105,6 +107,13 @@ def test_transparent_animation_has_a_transparent_background(tmp_path) -> None:
     # Without disposal=2 each frame would paint over the last and opaque
     # coverage would climb toward the whole canvas.
     assert max(coverage) < 0.9
+
+    # disposal=2 restores "the background colour", and a decoder that follows
+    # the specification paints whatever index the logical screen descriptor
+    # names. If that is not the transparent index the animation shows a solid
+    # background in a browser even though Pillow reports it as transparent.
+    header = output.read_bytes()[:13]
+    assert header[11] == transparent_index
 
 
 @pytest.mark.mlx

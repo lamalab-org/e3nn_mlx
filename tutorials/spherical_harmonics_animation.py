@@ -164,6 +164,14 @@ def _write_transparent_gif(
         duration=duration_ms,
         loop=0,
         transparency=255,
+        # disposal=2 means "restore to the background colour". Decoders differ:
+        # Pillow restores to transparent, but a decoder that follows the
+        # specification literally paints the colour the logical screen
+        # descriptor names. That index defaults to 0, an arbitrary opaque
+        # palette entry, which is what makes the animation appear on a solid
+        # background in a browser. Point it at the transparent index so both
+        # readings clear to nothing.
+        background=255,
         disposal=2,
         optimize=False,
     )
