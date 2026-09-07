@@ -1,12 +1,25 @@
 """Generate S2-grid fixtures for the UMA compatibility surface.
 
-Deterministic and deliberately not imported by the normal test suite: run it
-by hand against the pinned upstream environment when the contract changes.
+Deterministic and deliberately not imported by the normal test suite. Run it by
+hand, in the project's pinned reference environment, when the contract changes::
 
-    python tests/reference_generation/generate_uma_s2.py
+    uv venv .venv-reference --python 3.12
+    VIRTUAL_ENV=.venv-reference uv pip install \
+        -r tests/reference_generation/requirements.txt
+    .venv-reference/bin/python tests/reference_generation/generate_uma_s2.py
 
-The release gate is agreement of ``dense_to`` and ``dense_from``, the matrices
-eSCN/UMA actually consumes.
+Those pins (e3nn==0.5.8, torch==2.7.1, numpy==2.3.1) are the same ones the
+``[reference]`` extra declares, so the fixtures are reproducible from the
+repository alone. The manifest records the versions actually used; regenerating
+with anything else will show up there.
+
+Two families are covered:
+
+* the UMA grids, all ``integral`` normalization, where the release gate is
+  agreement of ``dense_to`` and ``dense_from`` -- the matrices eSCN/UMA consumes;
+* ``component`` and ``norm`` cases including ``lmax_in != lmax``, which pin the
+  forward and inverse scaling *absolutely*. A round-trip test cannot do this: a
+  matching error in synthesis and analysis cancels out in the round trip.
 """
 
 from __future__ import annotations
@@ -26,6 +39,19 @@ OUTPUT = ROOT / "reference_data"
 # (lmax, mmax) pairs covering an mmax == lmax grid and two undersampled ones.
 CASES = [(2, 2), (4, 2), (6, 2)]
 
+# (identifier, kind, kwargs) for the normalization modes UMA does not use but
+# this implementation still serves. lmax_in != lmax exercises the bandwidth
+# correction in _from_s2_factors, the easiest part to get wrong.
+NORMALIZATION_CASES = [
+    ("to_l3_component", "to", {"lmax": 3, "normalization": "component"}),
+    ("to_l3_norm", "to", {"lmax": 3, "normalization": "norm"}),
+    ("to_l2_integral", "to", {"lmax": 2, "normalization": "integral"}),
+    ("from_l3_component", "from", {"lmax": 3, "normalization": "component"}),
+    ("from_l2_in3_component", "from", {"lmax": 2, "lmax_in": 3, "normalization": "component"}),
+    ("from_l2_in3_norm", "from", {"lmax": 2, "lmax_in": 3, "normalization": "norm"}),
+    ("from_l3_in5_component", "from", {"lmax": 3, "lmax_in": 5, "normalization": "component"}),
+]
+
 
 def grid_resolution(lmax: int, mmax: int) -> tuple[int, int]:
     res_beta = 2 * (lmax + 1)
@@ -43,6 +69,7 @@ def main() -> int:
         "numpy": np.__version__,
         "normalization": "integral",
         "cases": [],
+        "normalization_cases": [],
     }
 
     for lmax, mmax in CASES:
@@ -71,6 +98,27 @@ def main() -> int:
                 "res_alpha": res_alpha,
                 "num_coefficients": (lmax + 1) ** 2,
                 "num_m_modes": 2 * lmax + 1,
+            }
+        )
+
+    for identifier, kind, kwargs in NORMALIZATION_CASES:
+        grid = o3.ToS2Grid(**kwargs) if kind == "to" else o3.FromS2Grid(**kwargs)
+        sha = grid.sha.numpy()
+        shb = grid.shb.numpy()
+        arrays[f"{identifier}_sha"] = sha
+        arrays[f"{identifier}_shb"] = shb
+        arrays[f"{identifier}_dense"] = (
+            np.einsum("mbi,am->bai", shb, sha)
+            if kind == "to"
+            else np.einsum("am,mbi->bai", sha, shb)
+        )
+        manifest["normalization_cases"].append(
+            {
+                "id": identifier,
+                "kind": kind,
+                "res_beta": int(grid.res_beta),
+                "res_alpha": int(grid.res_alpha),
+                **kwargs,
             }
         )
 

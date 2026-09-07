@@ -208,3 +208,64 @@ def test_uma_grids_match_upstream_e3nn_fixtures(lmax: int, mmax: int) -> None:
     assert _relative(to_grid.shb, reference[f"{key}_to_shb"]) < 1e-5
     assert _relative(from_grid.sha, reference[f"{key}_from_sha"]) < 1e-5
     assert _relative(from_grid.shb, reference[f"{key}_from_shb"]) < 1e-5
+
+
+# (identifier, kind, kwargs) mirroring NORMALIZATION_CASES in the generator.
+NORMALIZATION_CASES = [
+    ("to_l3_component", "to", {"lmax": 3, "normalization": "component"}),
+    ("to_l3_norm", "to", {"lmax": 3, "normalization": "norm"}),
+    ("to_l2_integral", "to", {"lmax": 2, "normalization": "integral"}),
+    ("from_l3_component", "from", {"lmax": 3, "normalization": "component"}),
+    ("from_l2_in3_component", "from", {"lmax": 2, "lmax_in": 3, "normalization": "component"}),
+    ("from_l2_in3_norm", "from", {"lmax": 2, "lmax_in": 3, "normalization": "norm"}),
+    ("from_l3_in5_component", "from", {"lmax": 3, "lmax_in": 5, "normalization": "component"}),
+]
+
+
+@pytest.mark.mlx
+@pytest.mark.e3nn_reference
+@pytest.mark.parametrize("identifier,kind,kwargs", NORMALIZATION_CASES)
+def test_normalization_factors_match_upstream_absolutely(identifier, kind, kwargs) -> None:
+    """Pin synthesis and analysis scaling against upstream, not just round-trip.
+
+    A round-trip cannot catch this class of bug: an error in the forward scale
+    that is mirrored in the inverse cancels exactly. These cases compare the
+    matrices themselves, and cover lmax_in != lmax, which drives the bandwidth
+    correction in _from_s2_factors.
+    """
+
+    mx = mlx_backend._require()
+    reference = np.load(REFERENCE)
+
+    if kind == "to":
+        grid = o3.ToS2Grid(**kwargs)
+        dense = mx.einsum("mbi,am->bai", grid.shb, grid.sha)
+    else:
+        grid = o3.FromS2Grid(**kwargs)
+        dense = mx.einsum("am,mbi->bai", grid.sha, grid.shb)
+
+    assert grid.res_beta == reference[f"{identifier}_shb"].shape[1]
+    assert _relative(grid.sha, reference[f"{identifier}_sha"]) < 1e-5
+    assert _relative(grid.shb, reference[f"{identifier}_shb"]) < 1e-5
+    assert _relative(dense, reference[f"{identifier}_dense"]) < 1e-5
+
+
+@pytest.mark.mlx
+@pytest.mark.e3nn_reference
+def test_lmax_in_changes_the_inverse_scaling() -> None:
+    """lmax_in must actually alter component/norm analysis, and not integral.
+
+    Guards against a bandwidth correction that is silently dropped: without it
+    these two would be identical and the parity test above would be the only
+    thing standing between us and a regression.
+    """
+
+    baseline = o3.FromS2Grid(lmax=2, lmax_in=2, normalization="component")
+    widened = o3.FromS2Grid(lmax=2, lmax_in=3, normalization="component")
+    ratio = float(np.sqrt(4.0 / 3.0))
+    assert _relative(widened.shb, np.asarray(baseline.shb, dtype=np.float64) * ratio) < 1e-5
+
+    # integral carries no 1/sqrt(lmax+1) factor, so lmax_in must not matter.
+    integral_baseline = o3.FromS2Grid(lmax=2, lmax_in=2, normalization="integral")
+    integral_widened = o3.FromS2Grid(lmax=2, lmax_in=3, normalization="integral")
+    assert _relative(integral_widened.shb, integral_baseline.shb) < 1e-6

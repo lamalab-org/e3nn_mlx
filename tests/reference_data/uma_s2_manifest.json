@@ -1,8 +1,8 @@
 {
   "schema": 1,
-  "e3nn": "0.6.0",
-  "torch": "2.14.0",
-  "numpy": "2.5.2",
+  "e3nn": "0.5.8",
+  "torch": "2.7.1",
+  "numpy": "2.3.1",
   "normalization": "integral",
   "cases": [
     {
@@ -28,6 +28,67 @@
       "res_alpha": 5,
       "num_coefficients": 49,
       "num_m_modes": 13
+    }
+  ],
+  "normalization_cases": [
+    {
+      "id": "to_l3_component",
+      "kind": "to",
+      "res_beta": 8,
+      "res_alpha": 7,
+      "lmax": 3,
+      "normalization": "component"
+    },
+    {
+      "id": "to_l3_norm",
+      "kind": "to",
+      "res_beta": 8,
+      "res_alpha": 7,
+      "lmax": 3,
+      "normalization": "norm"
+    },
+    {
+      "id": "to_l2_integral",
+      "kind": "to",
+      "res_beta": 6,
+      "res_alpha": 5,
+      "lmax": 2,
+      "normalization": "integral"
+    },
+    {
+      "id": "from_l3_component",
+      "kind": "from",
+      "res_beta": 8,
+      "res_alpha": 7,
+      "lmax": 3,
+      "normalization": "component"
+    },
+    {
+      "id": "from_l2_in3_component",
+      "kind": "from",
+      "res_beta": 6,
+      "res_alpha": 5,
+      "lmax": 2,
+      "lmax_in": 3,
+      "normalization": "component"
+    },
+    {
+      "id": "from_l2_in3_norm",
+      "kind": "from",
+      "res_beta": 6,
+      "res_alpha": 5,
+      "lmax": 2,
+      "lmax_in": 3,
+      "normalization": "norm"
+    },
+    {
+      "id": "from_l3_in5_component",
+      "kind": "from",
+      "res_beta": 8,
+      "res_alpha": 7,
+      "lmax": 3,
+      "lmax_in": 5,
+      "normalization": "component"
     }
   ]
 }

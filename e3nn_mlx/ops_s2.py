@@ -80,11 +80,6 @@ def _to_degree_scale(l: int, lmax: int, normalization: str | Any) -> float:
     return _per_degree_scales(lmax, normalization)[l]
 
 
-def _degree_scales(lmax: int, normalization: str | Any, np):
-    per_degree = _per_degree_scales(lmax, normalization)
-    return np.asarray([scale for l, scale in enumerate(per_degree) for _ in range(2 * l + 1)], dtype=np.float64)
-
-
 def _quadrature_beta_weights(res_beta: int, np):
     bandwidth = res_beta // 2
     k = np.arange(bandwidth, dtype=np.float64)
@@ -207,32 +202,6 @@ def _from_s2_factors(lmax: int, res_beta: int, res_alpha: int, normalization, lm
     dense = np.einsum("am,mbi->bai", sha, shb)
     analysis = dense.reshape(res_beta * res_alpha, (lmax + 1) ** 2).T
     return betas, alphas, grid, sha, shb, analysis
-
-
-@lru_cache(maxsize=None)
-def _transform_data(lmax: int, res_beta: int, res_alpha: int, normalization: str):
-    import numpy as np
-
-    mx, _ = require_mlx()
-    betas, alphas = s2_grid(res_beta, res_alpha)
-    grid = angles_to_xyz(alphas[None, :], betas[:, None])
-    harmonics = spherical_harmonics(
-        list(range(lmax + 1)), grid, normalize=False, normalization="integral"
-    )
-    scales = _degree_scales(lmax, normalization, np)
-    synthesis = np.asarray(harmonics.tolist(), dtype=np.float64).reshape(res_beta * res_alpha, -1) * scales[None, :]
-    beta_weights = _quadrature_beta_weights(res_beta, np)
-    weights = np.repeat(beta_weights, res_alpha)
-    weighted = synthesis * weights[:, None]
-    gram = synthesis.T @ weighted
-    analysis = np.linalg.solve(gram, weighted.T)
-    return (
-        synthesis.astype(np.float32),
-        analysis.astype(np.float32),
-        np.asarray(betas.tolist(), dtype=np.float32),
-        np.asarray(alphas.tolist(), dtype=np.float32),
-        np.asarray(grid.tolist(), dtype=np.float32),
-    )
 
 
 class ToS2Grid(mlx_module_base()):
